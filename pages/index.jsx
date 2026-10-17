@@ -39,12 +39,14 @@ export default function OpsPortal() {
   const [isSyncing, setIsSyncing] = useState(false);
   const editingRowRef = useRef(editingRow);
 
-  const [showUploadModal, setShowUploadModal] = useState(false);
-  const [uploadMode, setUploadMode] = useState('replace');
-  const [uploadStatus, setUploadStatus] = useState('');
-  const [isUploading, setIsUploading] = useState(false);
-  const fileInputRef = useRef(null);
+  // Google Sheet Link Modal State
+  const [showSheetLinkModal, setShowSheetLinkModal] = useState(false);
+  const [sheetUrlInput, setSheetUrlInput] = useState('');
+  const [sheetSyncMode, setSheetSyncMode] = useState('replace');
+  const [isSyncingSheet, setIsSyncingSheet] = useState(false);
+  const [sheetSyncMsg, setSheetSyncMsg] = useState('');
 
+  // Clear Roster Modal State
   const [showClearModal, setShowClearModal] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
 
@@ -179,7 +181,7 @@ export default function OpsPortal() {
       if (error) throw error;
       setRecords([]);
       setShowClearModal(false);
-      alert('All duty roster records cleared.');
+      alert('All duty roster records cleared. Portal is now blank.');
     } catch (err) {
       alert('Failed to clear: ' + err.message);
     } finally {
@@ -246,50 +248,71 @@ export default function OpsPortal() {
     return parsedData;
   };
 
-  const handleFileUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+  // FETCH DATA DIRECTLY FROM GOOGLE SHEET LINK
+  const handleSyncGoogleSheet = async (e) => {
+    e.preventDefault();
+    if (!sheetUrlInput.trim()) return alert('Please paste a Google Sheet link');
 
-    setIsUploading(true);
-    setUploadStatus('Reading CSV file...');
+    setIsSyncingSheet(true);
+    setSheetSyncMsg('Connecting to Google Sheet...');
 
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      try {
-        const text = event.target.result;
-        const rows = parseCSV(text);
-
-        if (rows.length === 0) {
-          alert('No valid records found.');
-          setIsUploading(false);
-          return;
-        }
-
-        if (uploadMode === 'replace') {
-          await supabase
-            .from('duty_roster')
-            .delete()
-            .neq('Biometric Calling Status', 'IMPOSSIBLE_STATUS_CODE_XYZ');
-        }
-
-        const chunkSize = 200;
-        for (let i = 0; i < rows.length; i += chunkSize) {
-          const chunk = rows.slice(i, i + chunkSize);
-          const { error: insertError } = await supabase.from('duty_roster').insert(chunk);
-          if (insertError) throw new Error(insertError.message);
-        }
-
-        setIsUploading(false);
-        setShowUploadModal(false);
-        fetchRecords(false);
-        alert(`Success! Updated ${rows.length} records.`);
-      } catch (err) {
-        alert('Upload Failed: ' + err.message);
-        setIsUploading(false);
+    try {
+      // Extract Google Sheet ID from URL
+      const match = sheetUrlInput.match(/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+      if (!match || !match[1]) {
+        throw new Error('Invalid Google Sheet URL. Please copy link from address bar.');
       }
-    };
-    reader.readAsText(file);
-    if (fileInputRef.current) fileInputRef.current.value = '';
+      const sheetId = match[1];
+
+      // Direct CSV export link for Google Sheets
+      const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv`;
+      setSheetSyncMsg('Downloading data directly from Google Sheet...');
+
+      const response = await fetch(csvUrl);
+      if (!response.ok) {
+        throw new Error('Could not read Sheet. Make sure sheet Share setting is "Anyone with link can view".');
+      }
+
+      const text = await response.text();
+      const rows = parseCSV(text);
+
+      if (rows.length === 0) {
+        throw new Error('No rows found or headers do not match.');
+      }
+
+      setSheetSyncMsg(`Parsed ${rows.length} records. Updating Supabase database...`);
+
+      if (sheetSyncMode === 'replace') {
+        await supabase
+          .from('duty_roster')
+          .delete()
+          .neq('Biometric Calling Status', 'IMPOSSIBLE_STATUS_CODE_XYZ');
+      }
+
+      const chunkSize = 200;
+      for (let i = 0; i < rows.length; i += chunkSize) {
+        const chunk = rows.slice(i, i + chunkSize);
+        setSheetSyncMsg(`Uploading records ${i + 1} to ${Math.min(i + chunkSize, rows.length)} of ${rows.length}...`);
+        const { error: insertError } = await supabase.from('duty_roster').insert(chunk);
+        if (insertError) throw new Error(insertError.message);
+      }
+
+      setSheetSyncMsg('Sync complete!');
+      setTimeout(() => {
+        setIsSyncingSheet(false);
+        setShowSheetLinkModal(false);
+        setSheetSyncMsg('');
+        setSheetUrlInput('');
+        fetchRecords(false);
+        alert(`Success! ${rows.length} records imported from Google Sheet into InnoView.`);
+      }, 500);
+
+    } catch (err) {
+      console.error('Sheet Sync Error:', err);
+      alert('Sync Failed: ' + err.message);
+      setIsSyncingSheet(false);
+      setSheetSyncMsg('');
+    }
   };
 
   const exportCSV = () => {
@@ -402,16 +425,34 @@ export default function OpsPortal() {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <button onClick={() => setShowUploadModal(true)} style={{ background: '#2563eb', color: '#ffffff', border: 'none', padding: '6px 14px', borderRadius: '7px', fontWeight: 600, fontSize: '13px', cursor: 'pointer' }}>
-              📤 Update List (CSV)
+            {/* GOOGLE SHEET SYNC BUTTON */}
+            <button
+              onClick={() => setShowSheetLinkModal(true)}
+              style={{
+                background: 'linear-gradient(135deg, #10b981, #059669)',
+                color: '#ffffff',
+                border: 'none',
+                padding: '7px 15px',
+                borderRadius: '7px',
+                fontWeight: 700,
+                fontSize: '13px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                boxShadow: '0 2px 6px rgba(16,185,129,0.3)'
+              }}
+            >
+              🔗 Sync Google Sheet
             </button>
+
             <button onClick={() => setShowClearModal(true)} style={{ background: '#fff1f2', color: '#e11d48', border: '1px solid #fecdd3', padding: '6px 12px', borderRadius: '7px', fontWeight: 600, fontSize: '13px', cursor: 'pointer' }}>
-              🗑️ Clear List
+              🗑️ Clear Roster (Blank)
             </button>
             <button onClick={() => setAutoSync(!autoSync)} style={{ background: autoSync ? '#f0fdf4' : '#f8fafc', color: autoSync ? '#15803d' : '#64748b', border: '1px solid #cbd5e1', padding: '6px 12px', borderRadius: '7px', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}>
               ● {autoSync ? 'Auto-Sync: 3s' : 'Auto-Sync: OFF'}
             </button>
-            <button onClick={exportCSV} style={{ background: '#059669', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: '7px', fontWeight: 600, fontSize: '13px', cursor: 'pointer' }}>
+            <button onClick={exportCSV} style={{ background: '#0f172a', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: '7px', fontWeight: 600, fontSize: '13px', cursor: 'pointer' }}>
               📥 Export CSV
             </button>
             <button onClick={handleLogout} style={{ background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', padding: '6px 12px', borderRadius: '7px', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}>
@@ -449,7 +490,7 @@ export default function OpsPortal() {
             justifyContent: 'space-between'
           }}>
             <span>SHEETS & VIEWS</span>
-            <span style={{ fontSize: '14px', cursor: 'pointer' }} title="Add Sheet">＋</span>
+            <span style={{ fontSize: '14px', cursor: 'pointer' }} onClick={() => setShowSheetLinkModal(true)} title="Sync from Sheet Link">＋</span>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', padding: '6px 0' }}>
@@ -489,7 +530,7 @@ export default function OpsPortal() {
           </div>
 
           <div style={{ marginTop: 'auto', padding: '12px 16px', borderTop: '1px solid #cbd5e1', fontSize: '11px', color: '#64748b' }}>
-            Total Roster: <strong>{records.length}</strong>
+            Total Loaded: <strong>{records.length}</strong>
           </div>
         </aside>
 
@@ -575,7 +616,31 @@ export default function OpsPortal() {
                     </tr>
                   ) : filtered.length === 0 ? (
                     <tr>
-                      <td colSpan={8} style={{ textAlign: 'center', padding: '50px 0', color: '#64748b' }}>No matching records found for tab: <strong>{activeSheetTab}</strong></td>
+                      <td colSpan={8} style={{ textAlign: 'center', padding: '60px 0', color: '#64748b' }}>
+                        <div style={{ fontSize: '16px', fontWeight: 700, color: '#334155' }}>
+                          {records.length === 0 ? 'No Data Loaded (Portal is Blank)' : `No matching records found for ${activeSheetTab}.`}
+                        </div>
+                        <div style={{ fontSize: '13px', color: '#64748b', marginTop: '6px' }}>
+                          Paste your Google Sheet URL to immediately load duty roster entries.
+                        </div>
+                        <div style={{ marginTop: '16px' }}>
+                          <button
+                            onClick={() => setShowSheetLinkModal(true)}
+                            style={{
+                              padding: '9px 18px',
+                              background: '#10b981',
+                              color: '#fff',
+                              border: 'none',
+                              borderRadius: '7px',
+                              fontWeight: 700,
+                              fontSize: '13px',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            🔗 Paste Google Sheet Link
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   ) : (
                     filtered.map((row, index) => {
@@ -648,41 +713,151 @@ export default function OpsPortal() {
         </main>
       </div>
 
-      {/* Modal 1: Upload CSV */}
-      {showUploadModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
-          <div style={{ background: '#fff', borderRadius: '12px', width: '480px', padding: '24px' }}>
-            <h3 style={{ margin: '0 0 16px 0' }}>Upload Roster CSV</h3>
-            <div style={{ display: 'flex', gap: '10px', marginBottom: '16px' }}>
-              <button onClick={() => setUploadMode('replace')} style={{ flex: 1, padding: '8px', border: uploadMode === 'replace' ? '2px solid #2563eb' : '1px solid #cbd5e1' }}>Replace All</button>
-              <button onClick={() => setUploadMode('append')} style={{ flex: 1, padding: '8px', border: uploadMode === 'append' ? '2px solid #2563eb' : '1px solid #cbd5e1' }}>Append</button>
+      {/* POPUP MODAL: PASTE GOOGLE SHEET LINK */}
+      {showSheetLinkModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.65)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
+          <div style={{ background: '#fff', borderRadius: '14px', width: '520px', maxWidth: '94%', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.25)', border: '1px solid #e2e8f0', overflow: 'hidden' }}>
+            <div style={{ background: '#0f172a', padding: '18px 24px', color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 700 }}>🔗 Sync from Google Sheet</h3>
+                <p style={{ margin: '3px 0 0 0', fontSize: '12px', color: '#94a3b8' }}>Paste your spreadsheet link to load all rows into InnoView</p>
+              </div>
+              {!isSyncingSheet && (
+                <button onClick={() => setShowSheetLinkModal(false)} style={{ background: 'transparent', border: 'none', color: '#94a3b8', fontSize: '20px', cursor: 'pointer' }}>✕</button>
+              )}
             </div>
-            <input type="file" accept=".csv" ref={fileInputRef} onChange={handleFileUpload} disabled={isUploading} />
-            {uploadStatus && <div style={{ marginTop: '12px', color: '#2563eb', fontSize: '12px' }}>{uploadStatus}</div>}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '16px' }}>
-              <button onClick={() => setShowUploadModal(false)} disabled={isUploading} style={{ padding: '6px 14px' }}>Close</button>
-            </div>
+
+            <form onSubmit={handleSyncGoogleSheet} style={{ padding: '24px' }}>
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, marginBottom: '6px', color: '#1e293b' }}>
+                  Google Sheet URL / Link:
+                </label>
+                <input
+                  type="url"
+                  required
+                  placeholder="https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit..."
+                  value={sheetUrlInput}
+                  onChange={(e) => setSheetUrlInput(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '11px 12px',
+                    borderRadius: '8px',
+                    border: '1px solid #cbd5e1',
+                    fontSize: '13px',
+                    outline: 'none',
+                    boxSizing: 'border-box'
+                  }}
+                />
+                <div style={{ fontSize: '11px', color: '#64748b', marginTop: '6px' }}>
+                  💡 Tip: Make sure the Google Sheet permission is set to <strong>"Anyone with the link can view"</strong>.
+                </div>
+              </div>
+
+              <div style={{ marginBottom: '18px' }}>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, marginBottom: '6px', color: '#334155' }}>
+                  Sync Mode:
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setSheetSyncMode('replace')}
+                    style={{
+                      padding: '9px',
+                      borderRadius: '7px',
+                      border: sheetSyncMode === 'replace' ? '2px solid #2563eb' : '1px solid #cbd5e1',
+                      background: sheetSyncMode === 'replace' ? '#eff6ff' : '#fff',
+                      color: sheetSyncMode === 'replace' ? '#1d4ed8' : '#475569',
+                      fontWeight: 600,
+                      fontSize: '12px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    🔄 Replace Entire Roster
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSheetSyncMode('append')}
+                    style={{
+                      padding: '9px',
+                      borderRadius: '7px',
+                      border: sheetSyncMode === 'append' ? '2px solid #2563eb' : '1px solid #cbd5e1',
+                      background: sheetSyncMode === 'append' ? '#eff6ff' : '#fff',
+                      color: sheetSyncMode === 'append' ? '#1d4ed8' : '#475569',
+                      fontWeight: 600,
+                      fontSize: '12px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    ➕ Append Records
+                  </button>
+                </div>
+              </div>
+
+              {sheetSyncMsg && (
+                <div style={{ padding: '10px 12px', borderRadius: '8px', background: '#f1f5f9', border: '1px solid #e2e8f0', fontSize: '12px', color: '#059669', fontWeight: 600, textAlign: 'center', marginBottom: '14px' }}>
+                  ⏳ {sheetSyncMsg}
+                </div>
+              )}
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                <button
+                  type="button"
+                  disabled={isSyncingSheet}
+                  onClick={() => setShowSheetLinkModal(false)}
+                  style={{ padding: '8px 16px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: 600, color: '#475569' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSyncingSheet}
+                  style={{
+                    padding: '8px 20px',
+                    background: '#10b981',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontSize: '13px',
+                    fontWeight: 700,
+                    boxShadow: '0 2px 6px rgba(16,185,129,0.3)'
+                  }}
+                >
+                  {isSyncingSheet ? 'Syncing...' : 'Fetch & Load Sheet'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
 
-      {/* Modal 2: Confirm Clear */}
+      {/* MODAL 2: CONFIRM CLEAR ROSTER */}
       {showClearModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 110 }}>
-          <div style={{ background: '#fff', borderRadius: '12px', width: '400px', padding: '24px' }}>
-            <h3 style={{ margin: '0 0 12px 0', color: '#dc2626' }}>Clear Entire List?</h3>
-            <p style={{ margin: '0 0 16px 0', fontSize: '13px' }}>Delete all {records.length} records?</p>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-              <button onClick={() => setShowClearModal(false)} disabled={isClearing}>Cancel</button>
-              <button onClick={handleClearRoster} disabled={isClearing} style={{ background: '#dc2626', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: '6px' }}>{isClearing ? 'Deleting...' : 'Delete All'}</button>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.65)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 110 }}>
+          <div style={{ background: '#fff', borderRadius: '14px', width: '420px', maxWidth: '92%', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.25)', border: '1px solid #fee2e2', overflow: 'hidden' }}>
+            <div style={{ background: '#dc2626', padding: '16px 20px', color: '#fff' }}>
+              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700 }}>⚠️ Clear Entire Roster (Make Blank)?</h3>
+            </div>
+            <div style={{ padding: '20px' }}>
+              <p style={{ margin: '0 0 16px 0', fontSize: '13px', color: '#334155', lineHeight: 1.5 }}>
+                Are you sure you want to delete all <strong>{records.length} records</strong> and make the portal completely blank? You can import new records anytime using your Google Sheet link.
+              </p>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                <button onClick={() => setShowClearModal(false)} disabled={isClearing} style={{ padding: '8px 16px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: 600 }}>
+                  Cancel
+                </button>
+                <button onClick={handleClearRoster} disabled={isClearing} style={{ padding: '8px 18px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: 600 }}>
+                  {isClearing ? 'Clearing...' : 'Yes, Make Blank'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Modal 3: Reassign */}
+      {/* MODAL 3: REASSIGN */}
       {editingRow && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.6)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
           <div style={{ background: '#fff', borderRadius: '12px', width: '420px', padding: '20px' }}>
             <h3 style={{ margin: '0 0 14px 0' }}>Reassign Operator</h3>
             <form onSubmit={handleSaveEdit}>
