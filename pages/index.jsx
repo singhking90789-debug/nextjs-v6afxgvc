@@ -9,17 +9,6 @@ const supabase = createClient(
 const ADMIN_USER = 'admin';
 const ADMIN_PASS = 'admin123';
 
-const SHEET_TABS = [
-  { id: 'Dashboard', label: 'Dashboard', locked: true, color: '#2563eb' },
-  { id: 'RM Dashboard', label: 'RM Dashboard', locked: false, color: '#15803d' },
-  { id: 'O.C Dashboard', label: 'O.C Dashboard', locked: true, color: '#991b1b' },
-  { id: 'RM O.C Dashboard', label: 'RM O.C Dashboard', locked: false, color: '#1d4ed8' },
-  { id: 'Operator Calling Status', label: 'Operator Calling Status', locked: true, color: '#ca8a04' },
-  { id: 'Mock Calling Status', label: 'Mock Calling Status', locked: true, color: '#047857' },
-  { id: 'Exam Day Calling Status', label: 'Exam Day Calling Status', locked: true, color: '#7c3aed' },
-  { id: 'TV Data Download', label: 'TV Data Download', locked: true, color: '#0284c7' }
-];
-
 export default function OpsPortal() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authChecking, setAuthChecking] = useState(true);
@@ -30,7 +19,6 @@ export default function OpsPortal() {
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [activeSheetTab, setActiveSheetTab] = useState('Dashboard');
   const [callingFilter, setCallingFilter] = useState('All');
   const [editingRow, setEditingRow] = useState(null);
   const [editFormData, setEditFormData] = useState({ name: '', phone: '', shift: '' });
@@ -39,14 +27,12 @@ export default function OpsPortal() {
   const [isSyncing, setIsSyncing] = useState(false);
   const editingRowRef = useRef(editingRow);
 
-  // Google Sheet Link Modal State
-  const [showSheetLinkModal, setShowSheetLinkModal] = useState(false);
-  const [sheetUrlInput, setSheetUrlInput] = useState('');
-  const [sheetSyncMode, setSheetSyncMode] = useState('replace');
-  const [isSyncingSheet, setIsSyncingSheet] = useState(false);
-  const [sheetSyncMsg, setSheetSyncMsg] = useState('');
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [uploadMode, setUploadMode] = useState('replace');
+  const [uploadStatus, setUploadStatus] = useState('');
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef(null);
 
-  // Clear Roster Modal State
   const [showClearModal, setShowClearModal] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
 
@@ -65,7 +51,7 @@ export default function OpsPortal() {
       setIsAuthenticated(true);
       setLoginError('');
     } else {
-      setLoginError('Invalid Username or Password. Please try again.');
+      setLoginError('Invalid Administrator credentials.');
     }
   };
 
@@ -99,7 +85,7 @@ export default function OpsPortal() {
         }
       }
     } catch (err) {
-      console.error('Fetch err:', err);
+      console.error('Fetch Error:', err);
     } finally {
       if (!isBackground) setLoading(false);
       setTimeout(() => setIsSyncing(false), 400);
@@ -181,7 +167,7 @@ export default function OpsPortal() {
       if (error) throw error;
       setRecords([]);
       setShowClearModal(false);
-      alert('All duty roster records cleared. Portal is now blank.');
+      alert('Duty roster cleared successfully.');
     } catch (err) {
       alert('Failed to clear: ' + err.message);
     } finally {
@@ -248,71 +234,50 @@ export default function OpsPortal() {
     return parsedData;
   };
 
-  // FETCH DATA DIRECTLY FROM GOOGLE SHEET LINK
-  const handleSyncGoogleSheet = async (e) => {
-    e.preventDefault();
-    if (!sheetUrlInput.trim()) return alert('Please paste a Google Sheet link');
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
 
-    setIsSyncingSheet(true);
-    setSheetSyncMsg('Connecting to Google Sheet...');
+    setIsUploading(true);
+    setUploadStatus('Processing Roster File...');
 
-    try {
-      // Extract Google Sheet ID from URL
-      const match = sheetUrlInput.match(/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
-      if (!match || !match[1]) {
-        throw new Error('Invalid Google Sheet URL. Please copy link from address bar.');
-      }
-      const sheetId = match[1];
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const text = event.target.result;
+        const rows = parseCSV(text);
 
-      // Direct CSV export link for Google Sheets
-      const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv`;
-      setSheetSyncMsg('Downloading data directly from Google Sheet...');
+        if (rows.length === 0) {
+          alert('No valid records found in CSV.');
+          setIsUploading(false);
+          return;
+        }
 
-      const response = await fetch(csvUrl);
-      if (!response.ok) {
-        throw new Error('Could not read Sheet. Make sure sheet Share setting is "Anyone with link can view".');
-      }
+        if (uploadMode === 'replace') {
+          await supabase
+            .from('duty_roster')
+            .delete()
+            .neq('Biometric Calling Status', 'IMPOSSIBLE_STATUS_CODE_XYZ');
+        }
 
-      const text = await response.text();
-      const rows = parseCSV(text);
+        const chunkSize = 200;
+        for (let i = 0; i < rows.length; i += chunkSize) {
+          const chunk = rows.slice(i, i + chunkSize);
+          const { error: insertError } = await supabase.from('duty_roster').insert(chunk);
+          if (insertError) throw new Error(insertError.message);
+        }
 
-      if (rows.length === 0) {
-        throw new Error('No rows found or headers do not match.');
-      }
-
-      setSheetSyncMsg(`Parsed ${rows.length} records. Updating Supabase database...`);
-
-      if (sheetSyncMode === 'replace') {
-        await supabase
-          .from('duty_roster')
-          .delete()
-          .neq('Biometric Calling Status', 'IMPOSSIBLE_STATUS_CODE_XYZ');
-      }
-
-      const chunkSize = 200;
-      for (let i = 0; i < rows.length; i += chunkSize) {
-        const chunk = rows.slice(i, i + chunkSize);
-        setSheetSyncMsg(`Uploading records ${i + 1} to ${Math.min(i + chunkSize, rows.length)} of ${rows.length}...`);
-        const { error: insertError } = await supabase.from('duty_roster').insert(chunk);
-        if (insertError) throw new Error(insertError.message);
-      }
-
-      setSheetSyncMsg('Sync complete!');
-      setTimeout(() => {
-        setIsSyncingSheet(false);
-        setShowSheetLinkModal(false);
-        setSheetSyncMsg('');
-        setSheetUrlInput('');
+        setIsUploading(false);
+        setShowUploadModal(false);
         fetchRecords(false);
-        alert(`Success! ${rows.length} records imported from Google Sheet into InnoView.`);
-      }, 500);
-
-    } catch (err) {
-      console.error('Sheet Sync Error:', err);
-      alert('Sync Failed: ' + err.message);
-      setIsSyncingSheet(false);
-      setSheetSyncMsg('');
-    }
+        alert(`Success! Updated ${rows.length} operational units.`);
+      } catch (err) {
+        alert('Upload Error: ' + err.message);
+        setIsUploading(false);
+      }
+    };
+    reader.readAsText(file);
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const exportCSV = () => {
@@ -333,7 +298,7 @@ export default function OpsPortal() {
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `InnoView_${activeSheetTab.replace(/\s+/g, '_')}.csv`);
+    link.setAttribute('download', `InnoView_Command_Ops_${new Date().toISOString().slice(0, 10)}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -349,66 +314,129 @@ export default function OpsPortal() {
 
   const filtered = records.filter((r) => {
     const q = search.toLowerCase();
-    const matchesSearch =
+    return (
       (r['Center Name'] && String(r['Center Name']).toLowerCase().includes(q)) ||
       (r['Center Code'] && String(r['Center Code']).toLowerCase().includes(q)) ||
       (r['Biometric Operator Name'] && String(r['Biometric Operator Name']).toLowerCase().includes(q)) ||
       (r['Biometric Operator Number'] && String(r['Biometric Operator Number']).toLowerCase().includes(q)) ||
-      (r['City'] && String(r['City']).toLowerCase().includes(q));
-
-    let matchesTab = true;
-    if (activeSheetTab === 'Dashboard' || activeSheetTab === 'Operator Calling Status') {
-      matchesTab = true;
-    } else if (activeSheetTab === 'RM Dashboard' || activeSheetTab === 'RM O.C Dashboard') {
-      matchesTab = (r['Biometric Designation'] || '').toLowerCase().includes('rm') || (r['Biometric Designation'] || '').toLowerCase().includes('nodal');
-    } else if (activeSheetTab === 'O.C Dashboard') {
-      matchesTab = (r['Biometric Designation'] || '').toLowerCase().includes('oc') || (r['Biometric Designation'] || '').toLowerCase().includes('coord');
-    } else if (activeSheetTab === 'Mock Calling Status') {
-      matchesTab = (r['Total Shift'] || '').toLowerCase().includes('mock') || (r['Biometric Calling Status'] || '').toLowerCase().includes('mock');
-    } else if (activeSheetTab === 'Exam Day Calling Status') {
-      matchesTab = (r['Biometric Calling Status'] === 'Confirmed');
-    }
-
-    return matchesSearch && matchesTab;
+      (r['City'] && String(r['City']).toLowerCase().includes(q))
+    );
   });
 
-  if (authChecking) return <div style={{ background: '#f1f5f9', minHeight: '100vh' }}></div>;
+  if (authChecking) {
+    return <div style={{ background: '#090d16', minHeight: '100vh' }}></div>;
+  }
 
+  // SIGN IN
   if (!isAuthenticated) {
     return (
       <div style={{
-        fontFamily: 'Inter, sans-serif',
-        background: '#090d16',
+        fontFamily: 'Plus Jakarta Sans, Inter, sans-serif',
+        background: 'radial-gradient(circle at 50% 20%, #1e293b 0%, #090d16 80%)',
         minHeight: '100vh',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: '20px'
+        padding: '24px'
       }}>
         <div style={{
-          background: '#ffffff',
-          borderRadius: '16px',
+          background: 'rgba(255, 255, 255, 0.96)',
+          borderRadius: '24px',
           width: '100%',
-          maxWidth: '400px',
-          padding: '36px 32px',
-          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.45)'
+          maxWidth: '420px',
+          padding: '40px 36px',
+          boxShadow: '0 30px 60px -15px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.2)',
+          backdropFilter: 'blur(12px)'
         }}>
-          <h2 style={{ fontSize: '20px', fontWeight: 800, textAlign: 'center', margin: '0 0 16px 0' }}>InnoView Login</h2>
-          {loginError && <div style={{ background: '#fef2f2', color: '#b91c1c', padding: '10px', borderRadius: '8px', fontSize: '12px', marginBottom: '14px', textAlign: 'center' }}>{loginError}</div>}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', marginBottom: '28px' }}>
+            <div style={{
+              width: '46px',
+              height: '46px',
+              borderRadius: '12px',
+              background: 'linear-gradient(135deg, #0f172a, #1e293b)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 8px 16px rgba(0,0,0,0.2)'
+            }}>
+              <span style={{ fontSize: '22px' }}>⚡</span>
+            </div>
+            <div>
+              <span style={{ fontSize: '26px', fontWeight: '900', color: '#090d16', letterSpacing: '-0.8px' }}>
+                InnoView
+              </span>
+              <span style={{ display: 'block', fontSize: '11px', fontWeight: '700', color: '#6366f1', letterSpacing: '1px', textTransform: 'uppercase' }}>
+                Command Center
+              </span>
+            </div>
+          </div>
+
+          <p style={{ fontSize: '13px', color: '#64748b', textAlign: 'center', margin: '0 0 24px 0', lineHeight: 1.5 }}>
+            Secure Enterprise Gatekeeper. Please authenticate to monitor live rosters.
+          </p>
+
+          {loginError && (
+            <div style={{ background: '#fef2f2', border: '1px solid #fecdd3', color: '#b91c1c', padding: '11px', borderRadius: '10px', fontSize: '12px', fontWeight: 600, marginBottom: '18px', textAlign: 'center' }}>
+              ⚠️ {loginError}
+            </div>
+          )}
+
           <form onSubmit={handleLogin}>
-            <input type="text" required placeholder="Username" value={loginUser} onChange={(e) => setLoginUser(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', marginBottom: '12px', boxSizing: 'border-box' }} />
-            <input type="password" required placeholder="Password" value={loginPass} onChange={(e) => setLoginPass(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', marginBottom: '18px', boxSizing: 'border-box' }} />
-            <button type="submit" style={{ width: '100%', padding: '11px', background: '#090d16', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: 'pointer' }}>Sign In</button>
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '6px' }}>
+                ADMIN USERNAME
+              </label>
+              <input
+                type="text"
+                required
+                placeholder="Enter admin ID"
+                value={loginUser}
+                onChange={(e) => setLoginUser(e.target.value)}
+                style={{ width: '100%', padding: '12px 14px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '14px', outline: 'none', background: '#f8fafc', boxSizing: 'border-box' }}
+              />
+            </div>
+            <div style={{ marginBottom: '24px' }}>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '6px' }}>
+                PASSPHRASE
+              </label>
+              <input
+                type="password"
+                required
+                placeholder="••••••••"
+                value={loginPass}
+                onChange={(e) => setLoginPass(e.target.value)}
+                style={{ width: '100%', padding: '12px 14px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '14px', outline: 'none', background: '#f8fafc', boxSizing: 'border-box' }}
+              />
+            </div>
+            <button
+              type="submit"
+              style={{
+                width: '100%',
+                padding: '13px',
+                background: 'linear-gradient(135deg, #090d16, #1e293b)',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '10px',
+                fontSize: '14px',
+                fontWeight: 800,
+                cursor: 'pointer',
+                boxShadow: '0 10px 20px -5px rgba(0,0,0,0.4)',
+                letterSpacing: '0.3px'
+              }}
+            >
+              Sign In To Portal →
+            </button>
           </form>
         </div>
       </div>
     );
   }
 
+  // MAIN PORTAL
   return (
     <div style={{
-      fontFamily: 'Inter, sans-serif',
-      background: '#f1f5f9',
+      fontFamily: 'Plus Jakarta Sans, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      background: '#f8fafc',
       height: '100vh',
       display: 'flex',
       flexDirection: 'column',
@@ -416,358 +444,590 @@ export default function OpsPortal() {
       color: '#0f172a'
     }}>
       
-      {/* 1. TOP HEADER */}
-      <header style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0', padding: '10px 24px', flexShrink: 0, zIndex: 30 }}>
-        <div style={{ maxWidth: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      {/* 1. TOP PREMIUM HEADER */}
+      <header style={{
+        background: '#090d16',
+        borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+        padding: '12px 28px',
+        flexShrink: 0,
+        zIndex: 30,
+        boxShadow: '0 4px 20px rgba(0, 0, 0, 0.25)'
+      }}>
+        <div style={{ maxWidth: '1720px', margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <span style={{ fontSize: '22px', fontWeight: '900', color: '#090d16' }}>⚙️ InnoView</span>
+          {/* Brand */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+            <div style={{
+              width: '40px',
+              height: '40px',
+              borderRadius: '11px',
+              background: 'linear-gradient(135deg, #3b82f6, #6366f1)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 0 16px rgba(99, 102, 241, 0.45)'
+            }}>
+              <span style={{ fontSize: '20px' }}>⚡</span>
+            </div>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '22px', fontWeight: '900', color: '#ffffff', letterSpacing: '-0.8px' }}>
+                  InnoView
+                </span>
+                <span style={{ background: 'rgba(99, 102, 241, 0.2)', border: '1px solid rgba(99, 102, 241, 0.4)', color: '#a5b4fc', fontSize: '10px', padding: '2px 7px', borderRadius: '20px', fontWeight: 700 }}>
+                  PRO v2.5
+                </span>
+              </div>
+              <div style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>
+                Operations Command & Roster Intelligence
+              </div>
+            </div>
           </div>
 
+          {/* Action Bar */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            {/* GOOGLE SHEET SYNC BUTTON */}
             <button
-              onClick={() => setShowSheetLinkModal(true)}
+              onClick={() => {
+                setCallingFilter('All');
+                setSearch('');
+              }}
               style={{
-                background: 'linear-gradient(135deg, #10b981, #059669)',
-                color: '#ffffff',
-                border: 'none',
-                padding: '7px 15px',
-                borderRadius: '7px',
-                fontWeight: 700,
-                fontSize: '13px',
+                background: 'rgba(255, 255, 255, 0.08)',
+                color: '#f8fafc',
+                border: '1px solid rgba(255, 255, 255, 0.12)',
+                padding: '8px 14px',
+                borderRadius: '8px',
+                fontWeight: 600,
+                fontSize: '12px',
                 cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '6px',
-                boxShadow: '0 2px 6px rgba(16,185,129,0.3)'
+                gap: '6px'
               }}
             >
-              🔗 Sync Google Sheet
+              📊 Reset View
             </button>
 
-            <button onClick={() => setShowClearModal(true)} style={{ background: '#fff1f2', color: '#e11d48', border: '1px solid #fecdd3', padding: '6px 12px', borderRadius: '7px', fontWeight: 600, fontSize: '13px', cursor: 'pointer' }}>
-              🗑️ Clear Roster (Blank)
+            <button
+              onClick={() => setShowUploadModal(true)}
+              style={{
+                background: 'linear-gradient(135deg, #2563eb, #3b82f6)',
+                color: '#ffffff',
+                border: 'none',
+                padding: '8px 15px',
+                borderRadius: '8px',
+                fontWeight: 700,
+                fontSize: '12px',
+                cursor: 'pointer',
+                boxShadow: '0 4px 12px rgba(37, 99, 235, 0.35)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              📤 Import Roster (CSV)
             </button>
-            <button onClick={() => setAutoSync(!autoSync)} style={{ background: autoSync ? '#f0fdf4' : '#f8fafc', color: autoSync ? '#15803d' : '#64748b', border: '1px solid #cbd5e1', padding: '6px 12px', borderRadius: '7px', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}>
-              ● {autoSync ? 'Auto-Sync: 3s' : 'Auto-Sync: OFF'}
+
+            <button
+              onClick={() => setShowClearModal(true)}
+              style={{
+                background: 'rgba(225, 29, 72, 0.15)',
+                color: '#fb7185',
+                border: '1px solid rgba(225, 29, 72, 0.3)',
+                padding: '8px 13px',
+                borderRadius: '8px',
+                fontWeight: 600,
+                fontSize: '12px',
+                cursor: 'pointer'
+              }}
+            >
+              🗑️ Purge Roster
             </button>
-            <button onClick={exportCSV} style={{ background: '#0f172a', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: '7px', fontWeight: 600, fontSize: '13px', cursor: 'pointer' }}>
-              📥 Export CSV
+
+            <button
+              onClick={() => setAutoSync(!autoSync)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                background: autoSync ? 'rgba(16, 185, 129, 0.12)' : 'rgba(255, 255, 255, 0.05)',
+                borderRadius: '8px',
+                fontSize: '12px',
+                color: autoSync ? '#34d399' : '#94a3b8',
+                border: autoSync ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(255, 255, 255, 0.1)',
+                padding: '8px 12px',
+                fontWeight: 600,
+                cursor: 'pointer'
+              }}
+            >
+              <span style={{
+                width: '8px',
+                height: '8px',
+                borderRadius: '50%',
+                background: autoSync ? (isSyncing ? '#34d399' : '#10b981') : '#64748b',
+                boxShadow: autoSync ? '0 0 8px #10b981' : 'none'
+              }}></span>
+              {autoSync ? 'Live Engine: 3s' : 'Sync: Paused'}
             </button>
-            <button onClick={handleLogout} style={{ background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', padding: '6px 12px', borderRadius: '7px', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}>
+
+            <button
+              onClick={exportCSV}
+              style={{
+                background: 'linear-gradient(135deg, #059669, #10b981)',
+                color: '#fff',
+                border: 'none',
+                padding: '8px 16px',
+                borderRadius: '8px',
+                fontWeight: 700,
+                fontSize: '12px',
+                cursor: 'pointer',
+                boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)'
+              }}
+            >
+              📥 Export Data
+            </button>
+
+            <button
+              onClick={handleLogout}
+              style={{
+                background: 'rgba(255, 255, 255, 0.06)',
+                color: '#cbd5e1',
+                border: '1px solid rgba(255, 255, 255, 0.12)',
+                padding: '8px 12px',
+                borderRadius: '8px',
+                fontWeight: 600,
+                fontSize: '12px',
+                cursor: 'pointer'
+              }}
+            >
               🔒 Logout
             </button>
           </div>
+
         </div>
       </header>
 
-      {/* 2. BODY SPLIT: LEFT VERTICAL SIDEBAR + RIGHT CONTENT */}
-      <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+      {/* 2. MAIN WORKSPACE */}
+      <main style={{
+        maxWidth: '1720px',
+        width: '100%',
+        margin: '0 auto',
+        padding: '18px 28px 14px 28px',
+        display: 'flex',
+        flexDirection: 'column',
+        flex: 1,
+        minHeight: 0,
+        boxSizing: 'border-box'
+      }}>
         
-        {/* LEFT VERTICAL CORNER TABS SIDEBAR */}
-        <aside style={{
-          width: '235px',
-          background: '#e9eef4',
-          borderRight: '1px solid #cbd5e1',
-          display: 'flex',
-          flexDirection: 'column',
-          flexShrink: 0,
-          overflowY: 'auto',
-          userSelect: 'none'
+        {/* KPI SUMMARY CARDS */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
+          gap: '14px',
+          marginBottom: '16px',
+          flexShrink: 0
         }}>
           
-          <div style={{
-            padding: '12px 16px',
-            fontSize: '11px',
-            fontWeight: 800,
-            color: '#64748b',
-            letterSpacing: '0.6px',
-            textTransform: 'uppercase',
-            borderBottom: '1px solid #cbd5e1',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between'
-          }}>
-            <span>SHEETS & VIEWS</span>
-            <span style={{ fontSize: '14px', cursor: 'pointer' }} onClick={() => setShowSheetLinkModal(true)} title="Sync from Sheet Link">＋</span>
+          {/* Card 1: Total */}
+          <div
+            onClick={() => setCallingFilter('All')}
+            style={{
+              cursor: 'pointer',
+              background: '#ffffff',
+              padding: '16px 20px',
+              borderRadius: '14px',
+              border: callingFilter === 'All' ? '2px solid #3b82f6' : '1px solid #e2e8f0',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.03)',
+              position: 'relative',
+              overflow: 'hidden'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '11px', fontWeight: 800, color: '#64748b', letterSpacing: '0.5px' }}>TOTAL UNITS</span>
+              <span style={{ background: '#f1f5f9', color: '#475569', padding: '3px 8px', borderRadius: '6px', fontSize: '10px', fontWeight: 700 }}>100%</span>
+            </div>
+            <div style={{ fontSize: '28px', fontWeight: 900, marginTop: '6px', color: '#090d16' }}>{counts.total}</div>
+            <div style={{ height: '3px', background: '#e2e8f0', borderRadius: '3px', marginTop: '10px' }}>
+              <div style={{ width: '100%', height: '100%', background: '#3b82f6', borderRadius: '3px' }}></div>
+            </div>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', padding: '6px 0' }}>
-            {SHEET_TABS.map((tab) => {
-              const isActive = activeSheetTab === tab.id;
-              return (
-                <div
-                  key={tab.id}
-                  onClick={() => setActiveSheetTab(tab.id)}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '10px 14px',
-                    margin: '2px 8px',
-                    borderRadius: '6px',
-                    background: isActive ? '#ffffff' : 'transparent',
-                    color: isActive ? '#1d4ed8' : '#334155',
-                    fontSize: '13px',
-                    fontWeight: isActive ? 700 : 500,
-                    cursor: 'pointer',
-                    borderLeft: `4px solid ${tab.color}`,
-                    boxShadow: isActive ? '0 1px 3px rgba(0,0,0,0.06)' : 'none',
-                    transition: 'all 0.15s ease'
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
-                    {tab.locked && <span style={{ fontSize: '11px', color: '#64748b' }}>🔒</span>}
-                    <span style={{ whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
-                      {tab.label}
-                    </span>
-                  </div>
-                  <span style={{ fontSize: '9px', color: '#94a3b8' }}>▼</span>
-                </div>
-              );
-            })}
+          {/* Card 2: Confirmed */}
+          <div
+            onClick={() => setCallingFilter('Confirmed')}
+            style={{
+              cursor: 'pointer',
+              background: '#ffffff',
+              padding: '16px 20px',
+              borderRadius: '14px',
+              border: callingFilter === 'Confirmed' ? '2px solid #10b981' : '1px solid #e2e8f0',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.03)'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '11px', fontWeight: 800, color: '#10b981', letterSpacing: '0.5px' }}>CONFIRMED</span>
+              <span style={{ background: '#ecfdf5', color: '#059669', padding: '3px 8px', borderRadius: '6px', fontSize: '10px', fontWeight: 700 }}>
+                {counts.total ? Math.round((counts.confirmed / counts.total) * 100) : 0}%
+              </span>
+            </div>
+            <div style={{ fontSize: '28px', fontWeight: 900, marginTop: '6px', color: '#059669' }}>{counts.confirmed}</div>
+            <div style={{ height: '3px', background: '#e2e8f0', borderRadius: '3px', marginTop: '10px' }}>
+              <div style={{ width: `${counts.total ? (counts.confirmed / counts.total) * 100 : 0}%`, height: '100%', background: '#10b981', borderRadius: '3px' }}></div>
+            </div>
           </div>
 
-          <div style={{ marginTop: 'auto', padding: '12px 16px', borderTop: '1px solid #cbd5e1', fontSize: '11px', color: '#64748b' }}>
-            Total Loaded: <strong>{records.length}</strong>
+          {/* Card 3: Pending */}
+          <div
+            onClick={() => setCallingFilter('Pending')}
+            style={{
+              cursor: 'pointer',
+              background: '#ffffff',
+              padding: '16px 20px',
+              borderRadius: '14px',
+              border: callingFilter === 'Pending' ? '2px solid #f59e0b' : '1px solid #e2e8f0',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.03)'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '11px', fontWeight: 800, color: '#d97706', letterSpacing: '0.5px' }}>PENDING CALLS</span>
+              <span style={{ background: '#fffbeb', color: '#b45309', padding: '3px 8px', borderRadius: '6px', fontSize: '10px', fontWeight: 700 }}>
+                {counts.total ? Math.round((counts.pending / counts.total) * 100) : 0}%
+              </span>
+            </div>
+            <div style={{ fontSize: '28px', fontWeight: 900, marginTop: '6px', color: '#d97706' }}>{counts.pending}</div>
+            <div style={{ height: '3px', background: '#e2e8f0', borderRadius: '3px', marginTop: '10px' }}>
+              <div style={{ width: `${counts.total ? (counts.pending / counts.total) * 100 : 0}%`, height: '100%', background: '#f59e0b', borderRadius: '3px' }}></div>
+            </div>
           </div>
-        </aside>
 
-        {/* RIGHT MAIN WORKSPACE */}
-        <main style={{
+          {/* Card 4: Replaced */}
+          <div
+            onClick={() => setCallingFilter('Replaced')}
+            style={{
+              cursor: 'pointer',
+              background: '#ffffff',
+              padding: '16px 20px',
+              borderRadius: '14px',
+              border: callingFilter === 'Replaced' ? '2px solid #6366f1' : '1px solid #e2e8f0',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.03)'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '11px', fontWeight: 800, color: '#6366f1', letterSpacing: '0.5px' }}>BACKUP REPLACED</span>
+              <span style={{ background: '#eef2ff', color: '#4f46e5', padding: '3px 8px', borderRadius: '6px', fontSize: '10px', fontWeight: 700 }}>
+                {counts.total ? Math.round((counts.replaced / counts.total) * 100) : 0}%
+              </span>
+            </div>
+            <div style={{ fontSize: '28px', fontWeight: 900, marginTop: '6px', color: '#4f46e5' }}>{counts.replaced}</div>
+            <div style={{ height: '3px', background: '#e2e8f0', borderRadius: '3px', marginTop: '10px' }}>
+              <div style={{ width: `${counts.total ? (counts.replaced / counts.total) * 100 : 0}%`, height: '100%', background: '#6366f1', borderRadius: '3px' }}></div>
+            </div>
+          </div>
+
+          {/* Card 5: Unreachable */}
+          <div
+            onClick={() => setCallingFilter('Not Reachable')}
+            style={{
+              cursor: 'pointer',
+              background: '#ffffff',
+              padding: '16px 20px',
+              borderRadius: '14px',
+              border: callingFilter === 'Not Reachable' ? '2px solid #ef4444' : '1px solid #e2e8f0',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.03)'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '11px', fontWeight: 800, color: '#ef4444', letterSpacing: '0.5px' }}>NOT REACHABLE</span>
+              <span style={{ background: '#fef2f2', color: '#b91c1c', padding: '3px 8px', borderRadius: '6px', fontSize: '10px', fontWeight: 700 }}>
+                {counts.total ? Math.round((counts.unreachable / counts.total) * 100) : 0}%
+              </span>
+            </div>
+            <div style={{ fontSize: '28px', fontWeight: 900, marginTop: '6px', color: '#dc2626' }}>{counts.unreachable}</div>
+            <div style={{ height: '3px', background: '#e2e8f0', borderRadius: '3px', marginTop: '10px' }}>
+              <div style={{ width: `${counts.total ? (counts.unreachable / counts.total) * 100 : 0}%`, height: '100%', background: '#ef4444', borderRadius: '3px' }}></div>
+            </div>
+          </div>
+
+        </div>
+
+        {/* SEARCH & FILTER CONTROLS */}
+        <div style={{
+          background: '#ffffff',
+          padding: '12px 18px',
+          borderRadius: '14px',
+          border: '1px solid #e2e8f0',
+          display: 'flex',
+          gap: '12px',
+          alignItems: 'center',
+          marginBottom: '14px',
+          flexShrink: 0,
+          boxShadow: '0 2px 8px rgba(0,0,0,0.02)'
+        }}>
+          <div style={{ position: 'relative', flex: 1 }}>
+            <span style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', fontSize: '15px' }}>🔍</span>
+            <input
+              type="text"
+              placeholder="Search by center code, venue name, city, operator name or contact number..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '10px 14px 10px 40px',
+                borderRadius: '9px',
+                border: '1px solid #e2e8f0',
+                fontSize: '13px',
+                outline: 'none',
+                background: '#f8fafc',
+                boxSizing: 'border-box',
+                transition: 'border 0.2s'
+              }}
+            />
+          </div>
+
+          <select
+            value={callingFilter}
+            onChange={(e) => setCallingFilter(e.target.value)}
+            style={{
+              padding: '10px 16px',
+              borderRadius: '9px',
+              border: '1px solid #cbd5e1',
+              fontSize: '13px',
+              background: '#ffffff',
+              fontWeight: 600,
+              cursor: 'pointer',
+              outline: 'none',
+              color: '#334155'
+            }}
+          >
+            <option value="All">All Operations ({records.length})</option>
+            <option value="Confirmed">✅ Confirmed Only</option>
+            <option value="Pending">⏳ Pending Only</option>
+            <option value="Not Reachable">❌ Not Reachable Only</option>
+            <option value="Replaced">🔄 Backup Replaced Only</option>
+          </select>
+
+          <button
+            onClick={() => fetchRecords(false)}
+            style={{
+              padding: '10px 16px',
+              background: '#f1f5f9',
+              border: '1px solid #cbd5e1',
+              borderRadius: '9px',
+              fontWeight: 700,
+              fontSize: '13px',
+              cursor: 'pointer',
+              color: '#334155',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+          >
+            🔄 Sync Live Data
+          </button>
+        </div>
+
+        {/* HIGH-END DATA TABLE */}
+        <div style={{
+          background: '#ffffff',
+          borderRadius: '16px',
+          border: '1px solid #e2e8f0',
           display: 'flex',
           flexDirection: 'column',
           flex: 1,
           minHeight: 0,
-          padding: '14px 20px 10px 20px',
-          overflow: 'hidden'
+          overflow: 'hidden',
+          boxShadow: '0 8px 24px rgba(0,0,0,0.04)'
         }}>
           
-          {/* KPI Cards */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '12px', flexShrink: 0 }}>
-            <div onClick={() => setCallingFilter('All')} style={{ cursor: 'pointer', background: '#fff', padding: '10px 16px', borderRadius: '8px', border: callingFilter === 'All' ? '2px solid #2563eb' : '1px solid #e2e8f0' }}>
-              <div style={{ color: '#64748b', fontSize: '11px', fontWeight: 700 }}>TOTAL DEPLOYED</div>
-              <div style={{ fontSize: '22px', fontWeight: 800, color: '#0f172a' }}>{counts.total}</div>
-            </div>
-            <div onClick={() => setCallingFilter('Confirmed')} style={{ cursor: 'pointer', background: '#fff', padding: '10px 16px', borderRadius: '8px', border: callingFilter === 'Confirmed' ? '2px solid #16a34a' : '1px solid #e2e8f0' }}>
-              <div style={{ color: '#16a34a', fontSize: '11px', fontWeight: 700 }}>CONFIRMED ({counts.total ? Math.round((counts.confirmed / counts.total) * 100) : 0}%)</div>
-              <div style={{ fontSize: '22px', fontWeight: 800, color: '#16a34a' }}>{counts.confirmed}</div>
-            </div>
-            <div onClick={() => setCallingFilter('Pending')} style={{ cursor: 'pointer', background: '#fff', padding: '10px 16px', borderRadius: '8px', border: callingFilter === 'Pending' ? '2px solid #ca8a04' : '1px solid #e2e8f0' }}>
-              <div style={{ color: '#ca8a04', fontSize: '11px', fontWeight: 700 }}>PENDING CALLS ({counts.total ? Math.round((counts.pending / counts.total) * 100) : 0}%)</div>
-              <div style={{ fontSize: '22px', fontWeight: 800, color: '#ca8a04' }}>{counts.pending}</div>
-            </div>
-            <div onClick={() => setCallingFilter('Replaced')} style={{ cursor: 'pointer', background: '#fff', padding: '10px 16px', borderRadius: '8px', border: callingFilter === 'Replaced' ? '2px solid #2563eb' : '1px solid #e2e8f0' }}>
-              <div style={{ color: '#2563eb', fontSize: '11px', fontWeight: 700 }}>REPLACED ({counts.total ? Math.round((counts.replaced / counts.total) * 100) : 0}%)</div>
-              <div style={{ fontSize: '22px', fontWeight: 800, color: '#2563eb' }}>{counts.replaced}</div>
-            </div>
-            <div onClick={() => setCallingFilter('Not Reachable')} style={{ cursor: 'pointer', background: '#fff', padding: '10px 16px', borderRadius: '8px', border: callingFilter === 'Not Reachable' ? '2px solid #dc2626' : '1px solid #e2e8f0' }}>
-              <div style={{ color: '#dc2626', fontSize: '11px', fontWeight: 700 }}>NOT REACHABLE ({counts.total ? Math.round((counts.unreachable / counts.total) * 100) : 0}%)</div>
-              <div style={{ fontSize: '22px', fontWeight: 800, color: '#dc2626' }}>{counts.unreachable}</div>
-            </div>
-          </div>
-
-          {/* Search Bar */}
-          <div style={{ background: '#fff', padding: '8px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '10px', flexShrink: 0 }}>
-            <input type="text" placeholder="Search by center, operator, phone..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ flex: 1, padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', outline: 'none' }} />
-            <select value={callingFilter} onChange={(e) => setCallingFilter(e.target.value)} style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}>
-              <option value="All">All Statuses</option>
-              <option value="Confirmed">Confirmed</option>
-              <option value="Pending">Pending</option>
-              <option value="Not Reachable">Not Reachable</option>
-              <option value="Replaced">Replaced</option>
-            </select>
-            <button onClick={() => fetchRecords(false)} style={{ padding: '8px 14px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '6px', fontWeight: 600, fontSize: '13px', cursor: 'pointer' }}>
-              🔄 Sync Data
-            </button>
-          </div>
-
-          {/* DATA TABLE CONTAINER */}
-          <div style={{
-            background: '#fff',
-            borderRadius: '8px',
-            border: '1px solid #e2e8f0',
-            display: 'flex',
-            flexDirection: 'column',
-            flex: 1,
-            minHeight: 0,
-            overflow: 'hidden'
-          }}>
-            
-            <div style={{ flex: 1, overflowY: 'auto', overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
-                <thead style={{ background: '#0f172a', color: '#f8fafc', position: 'sticky', top: 0, zIndex: 20, fontSize: '11px', fontWeight: 700 }}>
+          <div style={{ flex: 1, overflowY: 'auto', overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
+              <thead style={{
+                background: '#090d16',
+                color: '#f8fafc',
+                position: 'sticky',
+                top: 0,
+                zIndex: 20,
+                letterSpacing: '0.6px',
+                textTransform: 'uppercase',
+                fontSize: '11px',
+                fontWeight: 800
+              }}>
+                <tr>
+                  <th style={{ padding: '14px 16px', width: '90px' }}>CODE</th>
+                  <th style={{ padding: '14px 16px', minWidth: '300px' }}>EXAM CENTER VENUE</th>
+                  <th style={{ padding: '14px 16px', width: '130px' }}>CITY</th>
+                  <th style={{ padding: '14px 16px', width: '110px' }}>ROLE</th>
+                  <th style={{ padding: '14px 16px', width: '80px' }}>SHIFT</th>
+                  <th style={{ padding: '14px 16px', minWidth: '220px' }}>OPERATOR DETAILS</th>
+                  <th style={{ padding: '14px 16px', width: '190px' }}>CALLING STATUS</th>
+                  <th style={{ padding: '14px 16px', textAlign: 'center', width: '110px' }}>ACTIONS</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
                   <tr>
-                    <th style={{ padding: '10px 14px', width: '85px' }}>Code</th>
-                    <th style={{ padding: '10px 14px', minWidth: '280px' }}>Exam Center Details</th>
-                    <th style={{ padding: '10px 14px', width: '130px' }}>City</th>
-                    <th style={{ padding: '10px 14px', width: '100px' }}>Designation</th>
-                    <th style={{ padding: '10px 14px', width: '75px' }}>Shift</th>
-                    <th style={{ padding: '10px 14px', minWidth: '220px' }}>Operator Details</th>
-                    <th style={{ padding: '10px 14px', width: '185px' }}>Calling Status</th>
-                    <th style={{ padding: '10px 14px', textAlign: 'center', width: '110px' }}>Actions</th>
+                    <td colSpan={8} style={{ textAlign: 'center', padding: '70px 0', color: '#64748b' }}>
+                      <div style={{ fontSize: '16px', fontWeight: 700 }}>Connecting to Supabase Cloud Engine...</div>
+                      <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '6px' }}>Streaming duty roster records in real-time</div>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {loading ? (
-                    <tr>
-                      <td colSpan={8} style={{ textAlign: 'center', padding: '50px 0', color: '#64748b' }}>Loading records...</td>
-                    </tr>
-                  ) : filtered.length === 0 ? (
-                    <tr>
-                      <td colSpan={8} style={{ textAlign: 'center', padding: '60px 0', color: '#64748b' }}>
-                        <div style={{ fontSize: '16px', fontWeight: 700, color: '#334155' }}>
-                          {records.length === 0 ? 'No Data Loaded (Portal is Blank)' : `No matching records found for ${activeSheetTab}.`}
-                        </div>
-                        <div style={{ fontSize: '13px', color: '#64748b', marginTop: '6px' }}>
-                          Paste your Google Sheet URL to immediately load duty roster entries.
-                        </div>
-                        <div style={{ marginTop: '16px' }}>
-                          <button
-                            onClick={() => setShowSheetLinkModal(true)}
+                ) : filtered.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} style={{ textAlign: 'center', padding: '70px 0', color: '#64748b' }}>
+                      <div style={{ fontSize: '16px', fontWeight: 700 }}>No Operational Records Found</div>
+                      <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>Try adjusting your search query or status filter.</div>
+                    </td>
+                  </tr>
+                ) : (
+                  filtered.map((row, index) => {
+                    const status = row['Biometric Calling Status'] || 'Pending';
+                    const isConfirmed = status === 'Confirmed';
+                    const isReplaced = status === 'Replaced';
+                    const isUnreachable = status === 'Not Reachable';
+
+                    return (
+                      <tr
+                        key={row.id || index}
+                        style={{
+                          borderBottom: '1px solid #f1f5f9',
+                          background: index % 2 === 0 ? '#ffffff' : '#fafafa',
+                          transition: 'background 0.15s ease'
+                        }}
+                      >
+                        <td style={{ padding: '12px 16px' }}>
+                          <span style={{ fontFamily: 'ui-monospace, monospace', fontWeight: 800, color: '#2563eb', background: '#eff6ff', padding: '4px 8px', borderRadius: '6px', fontSize: '12px', border: '1px solid #dbeafe' }}>
+                            {row['Center Code']}
+                          </span>
+                        </td>
+                        <td style={{ padding: '12px 16px' }}>
+                          <div style={{ fontWeight: 700, color: '#1e293b', lineHeight: 1.4 }}>{row['Center Name']}</div>
+                        </td>
+                        <td style={{ padding: '12px 16px', color: '#475569', fontWeight: 600 }}>
+                          {row['City']}
+                        </td>
+                        <td style={{ padding: '12px 16px' }}>
+                          <span style={{ background: '#f1f5f9', color: '#334155', padding: '4px 9px', borderRadius: '6px', fontSize: '11px', fontWeight: 700, letterSpacing: '0.3px' }}>
+                            {row['Biometric Designation'] || 'Bio Opr'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '12px 16px' }}>
+                          <span style={{ background: '#e0e7ff', color: '#4338ca', padding: '4px 9px', borderRadius: '6px', fontSize: '11px', fontWeight: 800 }}>
+                            {row['Total Shift'] || 'S1S2'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '12px 16px' }}>
+                          <div style={{ fontWeight: 700, color: '#090d16' }}>{row['Biometric Operator Name'] || 'Unassigned'}</div>
+                          {row['Biometric Operator Number'] ? (
+                            <a
+                              href={`tel:${row['Biometric Operator Number']}`}
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '12px', color: '#2563eb', textDecoration: 'none', marginTop: '3px', fontWeight: 600 }}
+                            >
+                              📞 {row['Biometric Operator Number']}
+                            </a>
+                          ) : (
+                            <span style={{ fontSize: '11px', color: '#94a3b8' }}>No Mobile</span>
+                          )}
+                        </td>
+
+                        {/* WIDE STATUS PILL DROPDOWN */}
+                        <td style={{ padding: '12px 16px' }}>
+                          <select
+                            value={status}
+                            onChange={(e) => updateStatus(row.id, e.target.value)}
                             style={{
-                              padding: '9px 18px',
-                              background: '#10b981',
-                              color: '#fff',
-                              border: 'none',
-                              borderRadius: '7px',
-                              fontWeight: 700,
-                              fontSize: '13px',
-                              cursor: 'pointer'
+                              width: '100%',
+                              padding: '8px 12px',
+                              borderRadius: '8px',
+                              fontSize: '12px',
+                              fontWeight: 800,
+                              cursor: 'pointer',
+                              outline: 'none',
+                              boxSizing: 'border-box',
+                              border: isConfirmed ? '1px solid #86efac' : isReplaced ? '1px solid #bfdbfe' : isUnreachable ? '1px solid #fca5a5' : '1px solid #fde047',
+                              background: isConfirmed ? '#ecfdf5' : isReplaced ? '#eff6ff' : isUnreachable ? '#fef2f2' : '#fffbeb',
+                              color: isConfirmed ? '#059669' : isReplaced ? '#2563eb' : isUnreachable ? '#dc2626' : '#d97706',
+                              boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
                             }}
                           >
-                            🔗 Paste Google Sheet Link
+                            <option value="Pending">⏳ Pending</option>
+                            <option value="Confirmed">✅ Confirmed</option>
+                            <option value="Replaced">🔄 Replaced</option>
+                            <option value="Not Reachable">❌ Not Reachable</option>
+                          </select>
+                        </td>
+
+                        <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                          <button
+                            onClick={() => openEditModal(row)}
+                            style={{
+                              padding: '6px 12px',
+                              background: '#ffffff',
+                              border: '1px solid #cbd5e1',
+                              borderRadius: '7px',
+                              fontSize: '12px',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              color: '#334155',
+                              boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+                            }}
+                          >
+                            ✏️ Reassign
                           </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ) : (
-                    filtered.map((row, index) => {
-                      const status = row['Biometric Calling Status'] || 'Pending';
-                      const isConfirmed = status === 'Confirmed';
-                      const isReplaced = status === 'Replaced';
-                      const isUnreachable = status === 'Not Reachable';
-
-                      return (
-                        <tr key={row.id || index} style={{ borderBottom: '1px solid #f1f5f9', background: index % 2 === 0 ? '#ffffff' : '#fafafa' }}>
-                          <td style={{ padding: '10px 14px' }}>
-                            <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#2563eb', background: '#eff6ff', padding: '3px 8px', borderRadius: '4px' }}>
-                              {row['Center Code']}
-                            </span>
-                          </td>
-                          <td style={{ padding: '10px 14px', fontWeight: 600 }}>{row['Center Name']}</td>
-                          <td style={{ padding: '10px 14px', color: '#475569' }}>{row['City']}</td>
-                          <td style={{ padding: '10px 14px' }}>{row['Biometric Designation'] || 'Bio Opr'}</td>
-                          <td style={{ padding: '10px 14px' }}>{row['Total Shift'] || 'S1S2'}</td>
-                          <td style={{ padding: '10px 14px' }}>
-                            <div style={{ fontWeight: 600 }}>{row['Biometric Operator Name'] || 'Unassigned'}</div>
-                            {row['Biometric Operator Number'] && (
-                              <a href={`tel:${row['Biometric Operator Number']}`} style={{ fontSize: '12px', color: '#2563eb', textDecoration: 'none' }}>
-                                📞 {row['Biometric Operator Number']}
-                              </a>
-                            )}
-                          </td>
-                          <td style={{ padding: '10px 14px' }}>
-                            <select
-                              value={status}
-                              onChange={(e) => updateStatus(row.id, e.target.value)}
-                              style={{
-                                width: '100%',
-                                padding: '6px 8px',
-                                borderRadius: '6px',
-                                fontSize: '12px',
-                                fontWeight: 700,
-                                cursor: 'pointer',
-                                border: isConfirmed ? '1px solid #86efac' : isReplaced ? '1px solid #bfdbfe' : isUnreachable ? '1px solid #fca5a5' : '1px solid #fde047',
-                                background: isConfirmed ? '#dcfce7' : isReplaced ? '#eff6ff' : isUnreachable ? '#fee2e2' : '#fef9c3',
-                                color: isConfirmed ? '#15803d' : isReplaced ? '#1d4ed8' : isUnreachable ? '#b91c1c' : '#a16207'
-                              }}
-                            >
-                              <option value="Pending">⏳ Pending</option>
-                              <option value="Confirmed">✅ Confirmed</option>
-                              <option value="Replaced">🔄 Replaced</option>
-                              <option value="Not Reachable">❌ Not Reachable</option>
-                            </select>
-                          </td>
-                          <td style={{ padding: '10px 14px', textAlign: 'center' }}>
-                            <button onClick={() => openEditModal(row)} style={{ padding: '5px 10px', background: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '12px', cursor: 'pointer' }}>
-                              ✏️ Reassign
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            <div style={{ padding: '8px 16px', background: '#f8fafc', borderTop: '1px solid #e2e8f0', fontSize: '12px', color: '#64748b', display: 'flex', justifyContent: 'space-between' }}>
-              <span>Active Tab: <strong>{activeSheetTab}</strong> ({filtered.length} entries shown)</span>
-              <span>InnoView PET Portal</span>
-            </div>
-
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
           </div>
 
-        </main>
-      </div>
+          {/* Table Footer Summary */}
+          <div style={{
+            padding: '12px 20px',
+            background: '#f8fafc',
+            borderTop: '1px solid #e2e8f0',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            fontSize: '12px',
+            color: '#64748b',
+            flexShrink: 0,
+            fontWeight: 600
+          }}>
+            <span>Displaying <strong>{filtered.length}</strong> matching entries • Total Network: <strong>{records.length}</strong></span>
+            <span>⚡ InnoView Operations Hub • Supabase Secured</span>
+          </div>
 
-      {/* POPUP MODAL: PASTE GOOGLE SHEET LINK */}
-      {showSheetLinkModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.65)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
-          <div style={{ background: '#fff', borderRadius: '14px', width: '520px', maxWidth: '94%', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.25)', border: '1px solid #e2e8f0', overflow: 'hidden' }}>
-            <div style={{ background: '#0f172a', padding: '18px 24px', color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 700 }}>🔗 Sync from Google Sheet</h3>
-                <p style={{ margin: '3px 0 0 0', fontSize: '12px', color: '#94a3b8' }}>Paste your spreadsheet link to load all rows into InnoView</p>
-              </div>
-              {!isSyncingSheet && (
-                <button onClick={() => setShowSheetLinkModal(false)} style={{ background: 'transparent', border: 'none', color: '#94a3b8', fontSize: '20px', cursor: 'pointer' }}>✕</button>
-              )}
-            </div>
+        </div>
 
-            <form onSubmit={handleSyncGoogleSheet} style={{ padding: '24px' }}>
-              <div style={{ marginBottom: '16px' }}>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, marginBottom: '6px', color: '#1e293b' }}>
-                  Google Sheet URL / Link:
-                </label>
-                <input
-                  type="url"
-                  required
-                  placeholder="https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit..."
-                  value={sheetUrlInput}
-                  onChange={(e) => setSheetUrlInput(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '11px 12px',
-                    borderRadius: '8px',
-                    border: '1px solid #cbd5e1',
-                    fontSize: '13px',
-                    outline: 'none',
-                    boxSizing: 'border-box'
-                  }}
-                />
-                <div style={{ fontSize: '11px', color: '#64748b', marginTop: '6px' }}>
-                  💡 Tip: Make sure the Google Sheet permission is set to <strong>"Anyone with the link can view"</strong>.
+        {/* MODAL 1: CSV UPLOAD */}
+        {showUploadModal && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(9, 13, 22, 0.7)', backdropFilter: 'blur(5px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
+            <div style={{ background: '#ffffff', borderRadius: '18px', width: '500px', maxWidth: '94%', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.3)', border: '1px solid #e2e8f0', overflow: 'hidden' }}>
+              <div style={{ background: '#090d16', padding: '20px 24px', color: '#ffffff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 800 }}>Import Operational Roster</h3>
+                  <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: '#94a3b8' }}>Upload a CSV roster file to sync with live database</p>
                 </div>
+                {!isUploading && (
+                  <button onClick={() => setShowUploadModal(false)} style={{ background: 'transparent', border: 'none', color: '#94a3b8', fontSize: '20px', cursor: 'pointer' }}>✕</button>
+                )}
               </div>
 
-              <div style={{ marginBottom: '18px' }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, marginBottom: '6px', color: '#334155' }}>
-                  Sync Mode:
-                </label>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+              <div style={{ padding: '24px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '18px' }}>
                   <button
                     type="button"
-                    onClick={() => setSheetSyncMode('replace')}
+                    onClick={() => setUploadMode('replace')}
                     style={{
-                      padding: '9px',
-                      borderRadius: '7px',
-                      border: sheetSyncMode === 'replace' ? '2px solid #2563eb' : '1px solid #cbd5e1',
-                      background: sheetSyncMode === 'replace' ? '#eff6ff' : '#fff',
-                      color: sheetSyncMode === 'replace' ? '#1d4ed8' : '#475569',
-                      fontWeight: 600,
+                      padding: '11px',
+                      borderRadius: '9px',
+                      border: uploadMode === 'replace' ? '2px solid #2563eb' : '1px solid #cbd5e1',
+                      background: uploadMode === 'replace' ? '#eff6ff' : '#ffffff',
+                      color: uploadMode === 'replace' ? '#1d4ed8' : '#475569',
+                      fontWeight: 700,
                       fontSize: '12px',
                       cursor: 'pointer'
                     }}
@@ -776,14 +1036,14 @@ export default function OpsPortal() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setSheetSyncMode('append')}
+                    onClick={() => setUploadMode('append')}
                     style={{
-                      padding: '9px',
-                      borderRadius: '7px',
-                      border: sheetSyncMode === 'append' ? '2px solid #2563eb' : '1px solid #cbd5e1',
-                      background: sheetSyncMode === 'append' ? '#eff6ff' : '#fff',
-                      color: sheetSyncMode === 'append' ? '#1d4ed8' : '#475569',
-                      fontWeight: 600,
+                      padding: '11px',
+                      borderRadius: '9px',
+                      border: uploadMode === 'append' ? '2px solid #2563eb' : '1px solid #cbd5e1',
+                      background: uploadMode === 'append' ? '#eff6ff' : '#ffffff',
+                      color: uploadMode === 'append' ? '#1d4ed8' : '#475569',
+                      fontWeight: 700,
                       fontSize: '12px',
                       cursor: 'pointer'
                     }}
@@ -791,88 +1051,146 @@ export default function OpsPortal() {
                     ➕ Append Records
                   </button>
                 </div>
-              </div>
 
-              {sheetSyncMsg && (
-                <div style={{ padding: '10px 12px', borderRadius: '8px', background: '#f1f5f9', border: '1px solid #e2e8f0', fontSize: '12px', color: '#059669', fontWeight: 600, textAlign: 'center', marginBottom: '14px' }}>
-                  ⏳ {sheetSyncMsg}
+                <div style={{
+                  border: '2px dashed #cbd5e1',
+                  borderRadius: '12px',
+                  padding: '28px 16px',
+                  textAlign: 'center',
+                  background: '#f8fafc',
+                  marginBottom: '16px'
+                }}>
+                  <div style={{ fontSize: '36px', marginBottom: '8px' }}>📁</div>
+                  <div style={{ fontSize: '13px', fontWeight: 700, color: '#1e293b', marginBottom: '4px' }}>
+                    Select your CSV / Excel Roster File
+                  </div>
+                  <input
+                    type="file"
+                    accept=".csv"
+                    ref={fileInputRef}
+                    disabled={isUploading}
+                    onChange={handleFileUpload}
+                    style={{ fontSize: '12px', cursor: 'pointer', marginTop: '8px' }}
+                  />
                 </div>
-              )}
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                <button
-                  type="button"
-                  disabled={isSyncingSheet}
-                  onClick={() => setShowSheetLinkModal(false)}
-                  style={{ padding: '8px 16px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: 600, color: '#475569' }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSyncingSheet}
-                  style={{
-                    padding: '8px 20px',
-                    background: '#10b981',
-                    color: '#fff',
-                    border: 'none',
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                    fontSize: '13px',
-                    fontWeight: 700,
-                    boxShadow: '0 2px 6px rgba(16,185,129,0.3)'
-                  }}
-                >
-                  {isSyncingSheet ? 'Syncing...' : 'Fetch & Load Sheet'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+                {uploadStatus && (
+                  <div style={{ padding: '10px 14px', borderRadius: '8px', background: '#eff6ff', border: '1px solid #bfdbfe', fontSize: '12px', color: '#1d4ed8', fontWeight: 700, textAlign: 'center', marginBottom: '12px' }}>
+                    ⏳ {uploadStatus}
+                  </div>
+                )}
 
-      {/* MODAL 2: CONFIRM CLEAR ROSTER */}
-      {showClearModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.65)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 110 }}>
-          <div style={{ background: '#fff', borderRadius: '14px', width: '420px', maxWidth: '92%', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.25)', border: '1px solid #fee2e2', overflow: 'hidden' }}>
-            <div style={{ background: '#dc2626', padding: '16px 20px', color: '#fff' }}>
-              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700 }}>⚠️ Clear Entire Roster (Make Blank)?</h3>
-            </div>
-            <div style={{ padding: '20px' }}>
-              <p style={{ margin: '0 0 16px 0', fontSize: '13px', color: '#334155', lineHeight: 1.5 }}>
-                Are you sure you want to delete all <strong>{records.length} records</strong> and make the portal completely blank? You can import new records anytime using your Google Sheet link.
-              </p>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-                <button onClick={() => setShowClearModal(false)} disabled={isClearing} style={{ padding: '8px 16px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: 600 }}>
-                  Cancel
-                </button>
-                <button onClick={handleClearRoster} disabled={isClearing} style={{ padding: '8px 18px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: 600 }}>
-                  {isClearing ? 'Clearing...' : 'Yes, Make Blank'}
-                </button>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                  <button
+                    type="button"
+                    disabled={isUploading}
+                    onClick={() => setShowUploadModal(false)}
+                    style={{ padding: '9px 18px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: 600, color: '#475569' }}
+                  >
+                    Close
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* MODAL 3: REASSIGN */}
-      {editingRow && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.6)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
-          <div style={{ background: '#fff', borderRadius: '12px', width: '420px', padding: '20px' }}>
-            <h3 style={{ margin: '0 0 14px 0' }}>Reassign Operator</h3>
-            <form onSubmit={handleSaveEdit}>
-              <input type="text" placeholder="Name" required value={editFormData.name} onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })} style={{ width: '100%', padding: '8px', marginBottom: '10px', boxSizing: 'border-box' }} />
-              <input type="text" placeholder="Phone" required value={editFormData.phone} onChange={(e) => setEditFormData({ ...editFormData, phone: e.target.value })} style={{ width: '100%', padding: '8px', marginBottom: '10px', boxSizing: 'border-box' }} />
-              <input type="text" placeholder="Shift" value={editFormData.shift} onChange={(e) => setEditFormData({ ...editFormData, shift: e.target.value })} style={{ width: '100%', padding: '8px', marginBottom: '14px', boxSizing: 'border-box' }} />
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                <button type="button" onClick={() => setEditingRow(null)}>Cancel</button>
-                <button type="submit" style={{ background: '#2563eb', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: '6px' }}>Save</button>
+        {/* MODAL 2: CONFIRM CLEAR */}
+        {showClearModal && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(9, 13, 22, 0.7)', backdropFilter: 'blur(5px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 110 }}>
+            <div style={{ background: '#ffffff', borderRadius: '16px', width: '420px', maxWidth: '92%', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.3)', border: '1px solid #fee2e2', overflow: 'hidden' }}>
+              <div style={{ background: '#dc2626', padding: '18px 22px', color: '#ffffff' }}>
+                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 800 }}>⚠️ Purge All Duty Roster Records?</h3>
               </div>
-            </form>
+              <div style={{ padding: '22px' }}>
+                <p style={{ margin: '0 0 18px 0', fontSize: '13px', color: '#334155', lineHeight: 1.5 }}>
+                  Are you sure you want to delete all <strong>{records.length} operational units</strong>? This action will completely clear the database table.
+                </p>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                  <button
+                    type="button"
+                    disabled={isClearing}
+                    onClick={() => setShowClearModal(false)}
+                    style={{ padding: '9px 16px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '7px', cursor: 'pointer', fontSize: '13px', fontWeight: 600 }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isClearing}
+                    onClick={handleClearRoster}
+                    style={{ padding: '9px 18px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: '7px', cursor: 'pointer', fontSize: '13px', fontWeight: 700 }}
+                  >
+                    {isClearing ? 'Deleting...' : 'Yes, Delete All'}
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
+        {/* MODAL 3: REASSIGN */}
+        {editingRow && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(9, 13, 22, 0.65)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
+            <div style={{ background: '#ffffff', borderRadius: '16px', width: '440px', maxWidth: '92%', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.3)', border: '1px solid #e2e8f0', overflow: 'hidden' }}>
+              <div style={{ background: '#090d16', padding: '18px 22px', color: '#ffffff' }}>
+                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 800 }}>Reassign Center Operator</h3>
+                <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: '#94a3b8' }}>
+                  {editingRow['Center Name']} ({editingRow['Center Code']})
+                </p>
+              </div>
+              
+              <form onSubmit={handleSaveEdit} style={{ padding: '22px' }}>
+                <div style={{ marginBottom: '14px' }}>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, marginBottom: '6px', color: '#334155' }}>OPERATOR FULL NAME</label>
+                  <input
+                    type="text"
+                    required
+                    value={editFormData.name}
+                    onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })}
+                    style={{ width: '100%', padding: '10px 12px', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '13px', boxSizing: 'border-box' }}
+                  />
+                </div>
+                <div style={{ marginBottom: '14px' }}>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, marginBottom: '6px', color: '#334155' }}>OPERATOR CONTACT NUMBER</label>
+                  <input
+                    type="text"
+                    required
+                    value={editFormData.phone}
+                    onChange={(e) => setEditFormData({ ...editFormData, phone: e.target.value })}
+                    style={{ width: '100%', padding: '10px 12px', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '13px', boxSizing: 'border-box' }}
+                  />
+                </div>
+                <div style={{ marginBottom: '22px' }}>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, marginBottom: '6px', color: '#334155' }}>ASSIGNED SHIFT</label>
+                  <input
+                    type="text"
+                    value={editFormData.shift}
+                    onChange={(e) => setEditFormData({ ...editFormData, shift: e.target.value })}
+                    style={{ width: '100%', padding: '10px 12px', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '13px', boxSizing: 'border-box' }}
+                  />
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setEditingRow(null)}
+                    style={{ padding: '9px 16px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: 600 }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    style={{ padding: '9px 20px', background: 'linear-gradient(135deg, #2563eb, #1d4ed8)', color: '#ffffff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: 700, boxShadow: '0 4px 12px rgba(37,99,235,0.3)' }}
+                  >
+                    Save & Mark Replaced
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+      </main>
     </div>
   );
 }
