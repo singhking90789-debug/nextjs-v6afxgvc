@@ -20,7 +20,6 @@ const SHEET_TABS = [
   { id: 'TV Data Download', label: 'TV Data Download', locked: true, color: '#0284c7' }
 ];
 
-// SVG Lock Icon (Clean Corporate)
 function LockIcon() {
   return (
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.7 }}>
@@ -30,7 +29,6 @@ function LockIcon() {
   );
 }
 
-// SVG Dropdown Arrow
 function ChevronDown() {
   return (
     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}>
@@ -39,7 +37,6 @@ function ChevronDown() {
   );
 }
 
-// Original InnoView Brand Logo (Gear + Inner Curve)
 function InnoViewLogo() {
   return (
     <div style={{
@@ -126,7 +123,7 @@ export default function OpsPortal() {
     setIsSyncing(true);
 
     try {
-      let query = supabase.from('duty_roster').select('*').range(0, 4999);
+      let query = supabase.from('duty_roster').select('*').range(0, 9999);
       if (callingFilter !== 'All') {
         query = query.eq('Biometric Calling Status', callingFilter);
       }
@@ -229,6 +226,7 @@ export default function OpsPortal() {
     }
   };
 
+  // PARSER: Automatically expands each center row by its "Max Opr" count
   const parseCSV = (text) => {
     const lines = text.split(/\r?\n/).filter((l) => l.trim() !== '');
     if (lines.length < 2) return [];
@@ -253,19 +251,32 @@ export default function OpsPortal() {
     };
 
     const rawHeaders = parseLine(lines[0]);
-    const cleanHeader = (h) => h.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const clean = (h) => h.toLowerCase().replace(/[^a-z0-9]/g, '');
 
     const headerMap = {};
     rawHeaders.forEach((h, index) => {
-      const ch = cleanHeader(h);
-      if (ch.includes('code')) headerMap['Center Code'] = index;
-      else if (ch.includes('center') || ch.includes('venue') || ch.includes('college')) headerMap['Center Name'] = index;
-      else if (ch.includes('city') || ch.includes('district')) headerMap['City'] = index;
-      else if (ch.includes('design') || ch.includes('role')) headerMap['Biometric Designation'] = index;
-      else if (ch.includes('shift')) headerMap['Total Shift'] = index;
-      else if (ch.includes('operator') || ch.includes('name')) headerMap['Biometric Operator Name'] = index;
-      else if (ch.includes('phone') || ch.includes('mobile') || ch.includes('contact') || ch.includes('number')) headerMap['Biometric Operator Number'] = index;
-      else if (ch.includes('status')) headerMap['Biometric Calling Status'] = index;
+      const ch = clean(h);
+      if (ch.includes('tccode') || ch.includes('ccode') || ch.includes('centercode') || ch === 'code') {
+        if (!headerMap['Center Code']) headerMap['Center Code'] = index;
+      } else if (ch.includes('tcname') || ch.includes('centername') || ch.includes('collegename') || ch.includes('venuename')) {
+        headerMap['Center Name'] = index;
+      } else if (ch.includes('city') || ch.includes('district')) {
+        headerMap['City'] = index;
+      } else if (ch.includes('maxopr') || ch.includes('totalopr') || ch.includes('operatorcount') || ch.includes('no_of_opr')) {
+        headerMap['Max Opr'] = index;
+      } else if (ch.includes('pincode') || ch.includes('pin')) {
+        headerMap['PIN CODE'] = index;
+      } else if (ch.includes('state')) {
+        headerMap['State'] = index;
+      } else if (ch.includes('shift')) {
+        headerMap['Total Shift'] = index;
+      } else if (ch.includes('operator') && ch.includes('name')) {
+        headerMap['Biometric Operator Name'] = index;
+      } else if (ch.includes('phone') || ch.includes('mobile') || ch.includes('contact')) {
+        headerMap['Biometric Operator Number'] = index;
+      } else if (ch.includes('status')) {
+        headerMap['Biometric Calling Status'] = index;
+      }
     });
 
     const parsedData = [];
@@ -273,17 +284,39 @@ export default function OpsPortal() {
       const cols = parseLine(lines[i]);
       if (cols.length < 2) continue;
 
-      const row = {
-        'Center Code': headerMap['Center Code'] !== undefined ? cols[headerMap['Center Code']] : (cols[0] || ''),
-        'Center Name': headerMap['Center Name'] !== undefined ? cols[headerMap['Center Name']] : (cols[1] || ''),
-        'City': headerMap['City'] !== undefined ? cols[headerMap['City']] : (cols[2] || ''),
-        'Biometric Designation': headerMap['Biometric Designation'] !== undefined ? cols[headerMap['Biometric Designation']] : (cols[3] || 'Bio Opr'),
-        'Total Shift': headerMap['Total Shift'] !== undefined ? cols[headerMap['Total Shift']] : (cols[4] || 'S1S2'),
-        'Biometric Operator Name': headerMap['Biometric Operator Name'] !== undefined ? cols[headerMap['Biometric Operator Name']] : (cols[5] || 'Unassigned'),
-        'Biometric Operator Number': headerMap['Biometric Operator Number'] !== undefined ? cols[headerMap['Biometric Operator Number']] : (cols[6] || ''),
-        'Biometric Calling Status': (headerMap['Biometric Calling Status'] !== undefined ? cols[headerMap['Biometric Calling Status']] : cols[7]) || 'Pending'
-      };
-      parsedData.push(row);
+      const centerCode = headerMap['Center Code'] !== undefined ? cols[headerMap['Center Code']] : (cols[0] || '');
+      const centerName = headerMap['Center Name'] !== undefined ? cols[headerMap['Center Name']] : (cols[5] || cols[1] || '');
+      const city = headerMap['City'] !== undefined ? cols[headerMap['City']] : (cols[4] || cols[2] || '');
+      const pinCode = headerMap['PIN CODE'] !== undefined ? cols[headerMap['PIN CODE']] : '';
+      const state = headerMap['State'] !== undefined ? cols[headerMap['State']] : '';
+
+      // Read Max Opr count from column (e.g., 4)
+      let maxOpr = 1;
+      if (headerMap['Max Opr'] !== undefined && cols[headerMap['Max Opr']]) {
+        const val = parseInt(cols[headerMap['Max Opr']], 10);
+        if (!isNaN(val) && val > 0) maxOpr = val;
+      }
+
+      // Check if CSV already has pre-filled operator name/phone
+      const prefillName = headerMap['Biometric Operator Name'] !== undefined ? cols[headerMap['Biometric Operator Name']] : '';
+      const prefillPhone = headerMap['Biometric Operator Number'] !== undefined ? cols[headerMap['Biometric Operator Number']] : '';
+      const prefillStatus = headerMap['Biometric Calling Status'] !== undefined ? cols[headerMap['Biometric Calling Status']] : 'Pending';
+
+      // Repeat this center for each individual operator slot
+      for (let opIdx = 1; opIdx <= maxOpr; opIdx++) {
+        parsedData.push({
+          'Center Code': centerCode,
+          'Center Name': centerName,
+          'City': city,
+          'Biometric Designation': `Bio Opr ${opIdx}`,
+          'Total Shift': headerMap['Total Shift'] !== undefined ? cols[headerMap['Total Shift']] : 'S1S2',
+          'Biometric Operator Name': (opIdx === 1 && prefillName) ? prefillName : 'Unassigned',
+          'Biometric Operator Number': (opIdx === 1 && prefillPhone) ? prefillPhone : '',
+          'Biometric Calling Status': (opIdx === 1 && prefillStatus) ? prefillStatus : 'Pending',
+          'State': state,
+          'PIN CODE': pinCode
+        });
+      }
     }
     return parsedData;
   };
@@ -293,7 +326,7 @@ export default function OpsPortal() {
     if (!file) return;
 
     setIsUploading(true);
-    setUploadStatus('Reading CSV data...');
+    setUploadStatus('Reading Master Roster CSV...');
 
     const reader = new FileReader();
     reader.onload = async (event) => {
@@ -302,10 +335,12 @@ export default function OpsPortal() {
         const rows = parseCSV(text);
 
         if (rows.length === 0) {
-          alert('No valid records found in CSV.');
+          alert('No valid records found in CSV. Please verify column headers.');
           setIsUploading(false);
           return;
         }
+
+        setUploadStatus(`Expanding slots: Prepared ${rows.length} operator duty units...`);
 
         if (uploadMode === 'replace') {
           await supabase
@@ -317,6 +352,7 @@ export default function OpsPortal() {
         const chunkSize = 200;
         for (let i = 0; i < rows.length; i += chunkSize) {
           const chunk = rows.slice(i, i + chunkSize);
+          setUploadStatus(`Uploading ${i + 1} to ${Math.min(i + chunkSize, rows.length)} of ${rows.length}...`);
           const { error: insertError } = await supabase.from('duty_roster').insert(chunk);
           if (insertError) throw new Error(insertError.message);
         }
@@ -324,7 +360,7 @@ export default function OpsPortal() {
         setIsUploading(false);
         setShowUploadModal(false);
         fetchRecords(false);
-        alert(`Success! Updated ${rows.length} records.`);
+        alert(`Success! Created ${rows.length} operator duty slots across all exam centers.`);
       } catch (err) {
         alert('Upload Error: ' + err.message);
         setIsUploading(false);
@@ -462,7 +498,7 @@ export default function OpsPortal() {
       color: '#0f172a'
     }}>
       
-      {/* 1. TOP HEADER (CLEAN CLASSIC CORPORATE) */}
+      {/* 1. TOP HEADER */}
       <header style={{
         background: '#ffffff',
         borderBottom: '1px solid #e2e8f0',
@@ -658,7 +694,7 @@ export default function OpsPortal() {
             flexShrink: 0
           }}>
             <div onClick={() => setCallingFilter('All')} style={{ cursor: 'pointer', background: '#fff', padding: '12px 16px', borderRadius: '8px', border: callingFilter === 'All' ? '2px solid #2563eb' : '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
-              <div style={{ color: '#64748b', fontSize: '11px', fontWeight: 700 }}>TOTAL DEPLOYED</div>
+              <div style={{ color: '#64748b', fontSize: '11px', fontWeight: 700 }}>TOTAL OPERATOR SLOTS</div>
               <div style={{ fontSize: '24px', fontWeight: 900, color: '#0f172a', marginTop: '3px' }}>{counts.total}</div>
             </div>
             <div onClick={() => setCallingFilter('Confirmed')} style={{ cursor: 'pointer', background: '#fff', padding: '12px 16px', borderRadius: '8px', border: callingFilter === 'Confirmed' ? '2px solid #16a34a' : '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
@@ -745,7 +781,7 @@ export default function OpsPortal() {
                     <th style={{ padding: '12px 14px', width: '85px' }}>Code</th>
                     <th style={{ padding: '12px 14px', minWidth: '280px' }}>Exam Center Details</th>
                     <th style={{ padding: '12px 14px', width: '130px' }}>City</th>
-                    <th style={{ padding: '12px 14px', width: '100px' }}>Role</th>
+                    <th style={{ padding: '12px 14px', width: '110px' }}>Slot / Role</th>
                     <th style={{ padding: '12px 14px', width: '75px' }}>Shift</th>
                     <th style={{ padding: '12px 14px', minWidth: '220px' }}>Operator Details</th>
                     <th style={{ padding: '12px 14px', width: '185px' }}>Calling Status</th>
@@ -782,7 +818,7 @@ export default function OpsPortal() {
                           <td style={{ padding: '11px 14px', fontWeight: 600, color: '#1e293b' }}>{row['Center Name']}</td>
                           <td style={{ padding: '11px 14px', color: '#475569', fontWeight: 500 }}>{row['City']}</td>
                           <td style={{ padding: '11px 14px' }}>
-                            <span style={{ background: '#f1f5f9', color: '#334155', padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 600 }}>
+                            <span style={{ background: '#f1f5f9', color: '#1e293b', padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 700, border: '1px solid #e2e8f0' }}>
                               {row['Biometric Designation'] || 'Bio Opr'}
                             </span>
                           </td>
@@ -792,11 +828,15 @@ export default function OpsPortal() {
                             </span>
                           </td>
                           <td style={{ padding: '11px 14px' }}>
-                            <div style={{ fontWeight: 600, color: '#090d16' }}>{row['Biometric Operator Name'] || 'Unassigned'}</div>
-                            {row['Biometric Operator Number'] && (
+                            <div style={{ fontWeight: 600, color: row['Biometric Operator Name'] === 'Unassigned' ? '#94a3b8' : '#090d16' }}>
+                              {row['Biometric Operator Name'] || 'Unassigned'}
+                            </div>
+                            {row['Biometric Operator Number'] ? (
                               <a href={`tel:${row['Biometric Operator Number']}`} style={{ fontSize: '12px', color: '#2563eb', textDecoration: 'none', fontWeight: 500 }}>
                                 {row['Biometric Operator Number']}
                               </a>
+                            ) : (
+                              <span style={{ fontSize: '11px', color: '#cbd5e1' }}>Pending Assignment</span>
                             )}
                           </td>
                           <td style={{ padding: '11px 14px' }}>
@@ -826,7 +866,7 @@ export default function OpsPortal() {
                           </td>
                           <td style={{ padding: '11px 14px', textAlign: 'center' }}>
                             <button onClick={() => openEditModal(row)} style={{ padding: '5px 11px', background: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', color: '#334155' }}>
-                              Reassign
+                              Assign / Edit
                             </button>
                           </td>
                         </tr>
@@ -838,7 +878,7 @@ export default function OpsPortal() {
             </div>
 
             <div style={{ padding: '10px 18px', background: '#f8fafc', borderTop: '1px solid #e2e8f0', fontSize: '12px', color: '#64748b', display: 'flex', justifyContent: 'space-between' }}>
-              <span>Active Tab: <strong>{activeSheetTab}</strong> • Showing {filtered.length} entries</span>
+              <span>Active Tab: <strong>{activeSheetTab}</strong> • Showing {filtered.length} slots</span>
               <span>InnoView Operations Roster</span>
             </div>
           </div>
@@ -850,7 +890,10 @@ export default function OpsPortal() {
       {showUploadModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(9, 13, 22, 0.6)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
           <div style={{ background: '#fff', borderRadius: '14px', width: '480px', maxWidth: '94%', padding: '24px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)' }}>
-            <h3 style={{ margin: '0 0 16px 0', fontSize: '17px', fontWeight: 700 }}>Import Roster CSV</h3>
+            <h3 style={{ margin: '0 0 16px 0', fontSize: '17px', fontWeight: 700 }}>Import Master Roster CSV</h3>
+            <p style={{ margin: '0 0 14px 0', fontSize: '12px', color: '#64748b' }}>
+              Each center will automatically generate multiple rows based on its <strong>Max Opr</strong> value.
+            </p>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '16px' }}>
               <button type="button" onClick={() => setUploadMode('replace')} style={{ padding: '9px', borderRadius: '7px', border: uploadMode === 'replace' ? '2px solid #2563eb' : '1px solid #cbd5e1', background: uploadMode === 'replace' ? '#eff6ff' : '#fff', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}>Replace All</button>
               <button type="button" onClick={() => setUploadMode('append')} style={{ padding: '9px', borderRadius: '7px', border: uploadMode === 'append' ? '2px solid #2563eb' : '1px solid #cbd5e1', background: uploadMode === 'append' ? '#eff6ff' : '#fff', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}>Append</button>
@@ -878,18 +921,30 @@ export default function OpsPortal() {
         </div>
       )}
 
-      {/* REASSIGN MODAL */}
+      {/* REASSIGN / ASSIGN OPERATOR MODAL */}
       {editingRow && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(9, 13, 22, 0.6)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
           <div style={{ background: '#fff', borderRadius: '14px', width: '420px', maxWidth: '92%', padding: '22px' }}>
-            <h3 style={{ margin: '0 0 14px 0', fontWeight: 700 }}>Reassign Center Operator</h3>
+            <h3 style={{ margin: '0 0 6px 0', fontWeight: 700 }}>Assign Operator Details</h3>
+            <p style={{ margin: '0 0 14px 0', fontSize: '12px', color: '#64748b' }}>
+              {editingRow['Center Name']} ({editingRow['Center Code']}) — <strong>{editingRow['Biometric Designation']}</strong>
+            </p>
             <form onSubmit={handleSaveEdit}>
-              <input type="text" placeholder="Operator Name" required value={editFormData.name} onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })} style={{ width: '100%', padding: '9px 12px', border: '1px solid #cbd5e1', borderRadius: '6px', marginBottom: '10px', boxSizing: 'border-box' }} />
-              <input type="text" placeholder="Phone Number" required value={editFormData.phone} onChange={(e) => setEditFormData({ ...editFormData, phone: e.target.value })} style={{ width: '100%', padding: '9px 12px', border: '1px solid #cbd5e1', borderRadius: '6px', marginBottom: '10px', boxSizing: 'border-box' }} />
-              <input type="text" placeholder="Shift" value={editFormData.shift} onChange={(e) => setEditFormData({ ...editFormData, shift: e.target.value })} style={{ width: '100%', padding: '9px 12px', border: '1px solid #cbd5e1', borderRadius: '6px', marginBottom: '16px', boxSizing: 'border-box' }} />
+              <div style={{ marginBottom: '10px' }}>
+                <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>OPERATOR FULL NAME</label>
+                <input type="text" placeholder="e.g. Ramesh Kumar" required value={editFormData.name} onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })} style={{ width: '100%', padding: '9px 12px', border: '1px solid #cbd5e1', borderRadius: '6px', boxSizing: 'border-box', fontSize: '13px' }} />
+              </div>
+              <div style={{ marginBottom: '10px' }}>
+                <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>CONTACT MOBILE NUMBER</label>
+                <input type="text" placeholder="e.g. 9876543210" required value={editFormData.phone} onChange={(e) => setEditFormData({ ...editFormData, phone: e.target.value })} style={{ width: '100%', padding: '9px 12px', border: '1px solid #cbd5e1', borderRadius: '6px', boxSizing: 'border-box', fontSize: '13px' }} />
+              </div>
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>ASSIGNED SHIFT</label>
+                <input type="text" placeholder="e.g. S1S2" value={editFormData.shift} onChange={(e) => setEditFormData({ ...editFormData, shift: e.target.value })} style={{ width: '100%', padding: '9px 12px', border: '1px solid #cbd5e1', borderRadius: '6px', boxSizing: 'border-box', fontSize: '13px' }} />
+              </div>
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                <button type="button" onClick={() => setEditingRow(null)} style={{ padding: '7px 14px', borderRadius: '6px', border: '1px solid #cbd5e1', cursor: 'pointer' }}>Cancel</button>
-                <button type="submit" style={{ padding: '7px 16px', borderRadius: '6px', background: '#2563eb', color: '#fff', border: 'none', fontWeight: 600, cursor: 'pointer' }}>Save</button>
+                <button type="button" onClick={() => setEditingRow(null)} style={{ padding: '8px 14px', borderRadius: '6px', border: '1px solid #cbd5e1', cursor: 'pointer' }}>Cancel</button>
+                <button type="submit" style={{ padding: '8px 16px', borderRadius: '6px', background: '#2563eb', color: '#fff', border: 'none', fontWeight: 600, cursor: 'pointer' }}>Save Operator</button>
               </div>
             </form>
           </div>
