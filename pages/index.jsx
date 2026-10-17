@@ -10,7 +10,7 @@ const ADMIN_USER = 'admin';
 const ADMIN_PASS = 'admin123';
 
 const SHEET_TABS = [
-  { id: 'Dashboard', label: 'Dashboard', locked: true, color: '#b91c1c' },
+  { id: 'Dashboard', label: 'Dashboard', locked: true, color: '#2563eb' },
   { id: 'RM Dashboard', label: 'RM Dashboard', locked: false, color: '#15803d' },
   { id: 'O.C Dashboard', label: 'O.C Dashboard', locked: true, color: '#991b1b' },
   { id: 'RM O.C Dashboard', label: 'RM O.C Dashboard', locked: false, color: '#1d4ed8' },
@@ -179,10 +179,9 @@ export default function OpsPortal() {
       if (error) throw error;
       setRecords([]);
       setShowClearModal(false);
-      alert('All duty roster records have been cleared successfully.');
+      alert('All duty roster records cleared.');
     } catch (err) {
-      console.error('Clear Error:', err);
-      alert('Failed to clear list: ' + err.message);
+      alert('Failed to clear: ' + err.message);
     } finally {
       setIsClearing(false);
     }
@@ -261,16 +260,12 @@ export default function OpsPortal() {
         const rows = parseCSV(text);
 
         if (rows.length === 0) {
-          alert('No valid records found in CSV.');
+          alert('No valid records found.');
           setIsUploading(false);
-          setUploadStatus('');
           return;
         }
 
-        setUploadStatus(`Preparing ${rows.length} records...`);
-
         if (uploadMode === 'replace') {
-          setUploadStatus('Clearing old roster data...');
           await supabase
             .from('duty_roster')
             .delete()
@@ -280,25 +275,17 @@ export default function OpsPortal() {
         const chunkSize = 200;
         for (let i = 0; i < rows.length; i += chunkSize) {
           const chunk = rows.slice(i, i + chunkSize);
-          setUploadStatus(`Uploading records ${i + 1} to ${Math.min(i + chunkSize, rows.length)} of ${rows.length}...`);
           const { error: insertError } = await supabase.from('duty_roster').insert(chunk);
           if (insertError) throw new Error(insertError.message);
         }
 
-        setUploadStatus('Syncing complete!');
-        setTimeout(() => {
-          setIsUploading(false);
-          setShowUploadModal(false);
-          setUploadStatus('');
-          fetchRecords(false);
-          alert(`Success! ${rows.length} records updated in InnoView.`);
-        }, 600);
-
+        setIsUploading(false);
+        setShowUploadModal(false);
+        fetchRecords(false);
+        alert(`Success! Updated ${rows.length} records.`);
       } catch (err) {
-        console.error('Upload Error:', err);
         alert('Upload Failed: ' + err.message);
         setIsUploading(false);
-        setUploadStatus('');
       }
     };
     reader.readAsText(file);
@@ -323,7 +310,7 @@ export default function OpsPortal() {
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `InnoView_${activeSheetTab.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.setAttribute('download', `InnoView_${activeSheetTab.replace(/\s+/g, '_')}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -337,7 +324,6 @@ export default function OpsPortal() {
     unreachable: records.filter((r) => r['Biometric Calling Status'] === 'Not Reachable').length
   };
 
-  // Safe tab filter logic (Dashboard & Operator Calling Status show all records)
   const filtered = records.filter((r) => {
     const q = search.toLowerCase();
     const matchesSearch =
@@ -368,7 +354,7 @@ export default function OpsPortal() {
   if (!isAuthenticated) {
     return (
       <div style={{
-        fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+        fontFamily: 'Inter, sans-serif',
         background: '#090d16',
         minHeight: '100vh',
         display: 'flex',
@@ -382,39 +368,14 @@ export default function OpsPortal() {
           width: '100%',
           maxWidth: '400px',
           padding: '36px 32px',
-          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.45)',
-          border: '1px solid #e2e8f0'
+          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.45)'
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', marginBottom: '24px' }}>
-            <div style={{ width: '42px', height: '42px', borderRadius: '10px', background: '#090d16', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <svg width="24" height="24" viewBox="0 0 100 100" fill="none">
-                <path d="M44 8h12l2.2 9.5a36 36 0 0 1 10.3 4.3L77 15l8.5 8.5-6.8 8.5a36 36 0 0 1 4.3 10.3L92 44.5v12l-9.5 2.2a36 36 0 0 1-4.3 10.3L85 77.5l-8.5 8.5-8.5-6.8a36 36 0 0 1-10.3 4.3L55.5 93h-12l-2.2-9.5a36 36 0 0 1-10.3-4.3L22.5 86 14 77.5l6.8-8.5a36 36 0 0 1-4.3-10.3L7 56.5v-12l9.5-2.2a36 36 0 0 1 4.3-10.3L14 23.5l8.5-8.5 8.5 6.8a36 36 0 0 1 10.3-4.3L44 8z" fill="#ffffff"/>
-                <circle cx="50" cy="50" r="28" fill="#090d16" />
-                <path d="M 68 36 A 23 23 0 0 1 36 74" stroke="#ffffff" strokeWidth="5.5" strokeLinecap="round" fill="none" />
-              </svg>
-            </div>
-            <span style={{ fontSize: '26px', fontWeight: '900', color: '#090d16', letterSpacing: '-0.5px' }}>InnoView</span>
-          </div>
-
-          <h2 style={{ fontSize: '18px', fontWeight: 800, color: '#0f172a', textAlign: 'center', margin: '0 0 6px 0' }}>Operations Command Center</h2>
-          <p style={{ fontSize: '13px', color: '#64748b', textAlign: 'center', margin: '0 0 24px 0' }}>Please enter administrator credentials.</p>
-
-          {loginError && (
-            <div style={{ background: '#fef2f2', border: '1px solid #fecdd3', color: '#b91c1c', padding: '10px 14px', borderRadius: '8px', fontSize: '12px', fontWeight: 600, marginBottom: '16px', textAlign: 'center' }}>
-              ⚠️ {loginError}
-            </div>
-          )}
-
+          <h2 style={{ fontSize: '20px', fontWeight: 800, textAlign: 'center', margin: '0 0 16px 0' }}>InnoView Login</h2>
+          {loginError && <div style={{ background: '#fef2f2', color: '#b91c1c', padding: '10px', borderRadius: '8px', fontSize: '12px', marginBottom: '14px', textAlign: 'center' }}>{loginError}</div>}
           <form onSubmit={handleLogin}>
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '6px' }}>Username</label>
-              <input type="text" required placeholder="Enter username" value={loginUser} onChange={(e) => setLoginUser(e.target.value)} style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', outline: 'none', boxSizing: 'border-box' }} />
-            </div>
-            <div style={{ marginBottom: '24px' }}>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '6px' }}>Password</label>
-              <input type="password" required placeholder="Enter password" value={loginPass} onChange={(e) => setLoginPass(e.target.value)} style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', outline: 'none', boxSizing: 'border-box' }} />
-            </div>
-            <button type="submit" style={{ width: '100%', padding: '11px', background: '#090d16', color: '#ffffff', border: 'none', borderRadius: '8px', fontSize: '14px', fontWeight: 700, cursor: 'pointer', boxShadow: '0 4px 10px rgba(0,0,0,0.15)' }}>Sign In to Portal</button>
+            <input type="text" required placeholder="Username" value={loginUser} onChange={(e) => setLoginUser(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', marginBottom: '12px', boxSizing: 'border-box' }} />
+            <input type="password" required placeholder="Password" value={loginPass} onChange={(e) => setLoginPass(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', marginBottom: '18px', boxSizing: 'border-box' }} />
+            <button type="submit" style={{ width: '100%', padding: '11px', background: '#090d16', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: 'pointer' }}>Sign In</button>
           </form>
         </div>
       </div>
@@ -423,7 +384,7 @@ export default function OpsPortal() {
 
   return (
     <div style={{
-      fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      fontFamily: 'Inter, sans-serif',
       background: '#f1f5f9',
       height: '100vh',
       display: 'flex',
@@ -433,403 +394,310 @@ export default function OpsPortal() {
     }}>
       
       {/* 1. TOP HEADER */}
-      <header style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0', padding: '12px 24px', flexShrink: 0, zIndex: 30 }}>
-        <div style={{ maxWidth: '1680px', margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <header style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0', padding: '10px 24px', flexShrink: 0, zIndex: 30 }}>
+        <div style={{ maxWidth: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', userSelect: 'none' }}>
-            <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: '#090d16', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <svg width="24" height="24" viewBox="0 0 100 100" fill="none">
-                <path d="M44 8h12l2.2 9.5a36 36 0 0 1 10.3 4.3L77 15l8.5 8.5-6.8 8.5a36 36 0 0 1 4.3 10.3L92 44.5v12l-9.5 2.2a36 36 0 0 1-4.3 10.3L85 77.5l-8.5 8.5-8.5-6.8a36 36 0 0 1-10.3 4.3L55.5 93h-12l-2.2-9.5a36 36 0 0 1-10.3-4.3L22.5 86 14 77.5l6.8-8.5a36 36 0 0 1-4.3-10.3L7 56.5v-12l9.5-2.2a36 36 0 0 1 4.3-10.3L14 23.5l8.5-8.5 8.5 6.8a36 36 0 0 1 10.3-4.3L44 8z" fill="#ffffff"/>
-                <circle cx="50" cy="50" r="28" fill="#090d16" />
-                <path d="M 68 36 A 23 23 0 0 1 36 74" stroke="#ffffff" strokeWidth="5.5" strokeLinecap="round" fill="none" />
-              </svg>
-            </div>
-            <span style={{ fontSize: '24px', fontWeight: '900', color: '#000000', letterSpacing: '-0.8px' }}>InnoView</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <span style={{ fontSize: '22px', fontWeight: '900', color: '#090d16' }}>⚙️ InnoView</span>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <button onClick={() => { setActiveSheetTab('Dashboard'); setCallingFilter('All'); setSearch(''); }} style={{ display: 'flex', alignItems: 'center', gap: '7px', background: '#0f172a', color: '#ffffff', border: 'none', padding: '7px 14px', borderRadius: '8px', fontWeight: 600, fontSize: '13px', cursor: 'pointer' }}>
-              Dashboard
-            </button>
-            <button onClick={() => setShowUploadModal(true)} style={{ display: 'flex', alignItems: 'center', gap: '7px', background: '#2563eb', color: '#ffffff', border: 'none', padding: '7px 14px', borderRadius: '8px', fontWeight: 600, fontSize: '13px', cursor: 'pointer' }}>
+            <button onClick={() => setShowUploadModal(true)} style={{ background: '#2563eb', color: '#ffffff', border: 'none', padding: '6px 14px', borderRadius: '7px', fontWeight: 600, fontSize: '13px', cursor: 'pointer' }}>
               📤 Update List (CSV)
             </button>
-            <button onClick={() => setShowClearModal(true)} style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#fff1f2', color: '#e11d48', border: '1px solid #fecdd3', padding: '7px 13px', borderRadius: '8px', fontWeight: 600, fontSize: '13px', cursor: 'pointer' }}>
+            <button onClick={() => setShowClearModal(true)} style={{ background: '#fff1f2', color: '#e11d48', border: '1px solid #fecdd3', padding: '6px 12px', borderRadius: '7px', fontWeight: 600, fontSize: '13px', cursor: 'pointer' }}>
               🗑️ Clear List
             </button>
-            <button onClick={() => setAutoSync(!autoSync)} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '8px', width: '136px', height: '35px', background: autoSync ? '#f0fdf4' : '#f8fafc', borderRadius: '8px', fontSize: '12px', color: autoSync ? '#15803d' : '#64748b', border: autoSync ? '1px solid #bbf7d0' : '1px solid #e2e8f0', fontWeight: 600, cursor: 'pointer' }}>
-              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: autoSync ? (isSyncing ? '#22c55e' : '#16a34a') : '#94a3b8' }}></span>
-              <span>{autoSync ? 'Auto-Sync: 3s' : 'Auto-Sync: OFF'}</span>
+            <button onClick={() => setAutoSync(!autoSync)} style={{ background: autoSync ? '#f0fdf4' : '#f8fafc', color: autoSync ? '#15803d' : '#64748b', border: '1px solid #cbd5e1', padding: '6px 12px', borderRadius: '7px', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}>
+              ● {autoSync ? 'Auto-Sync: 3s' : 'Auto-Sync: OFF'}
             </button>
-            <button onClick={exportCSV} style={{ background: 'linear-gradient(135deg, #059669, #047857)', color: '#fff', border: 'none', padding: '7px 16px', borderRadius: '8px', fontWeight: 600, fontSize: '13px', cursor: 'pointer' }}>
+            <button onClick={exportCSV} style={{ background: '#059669', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: '7px', fontWeight: 600, fontSize: '13px', cursor: 'pointer' }}>
               📥 Export CSV
             </button>
-            <button onClick={handleLogout} style={{ background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', padding: '7px 12px', borderRadius: '8px', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}>
+            <button onClick={handleLogout} style={{ background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', padding: '6px 12px', borderRadius: '7px', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}>
               🔒 Logout
             </button>
           </div>
         </div>
       </header>
 
-      {/* 2. MAIN WORKSPACE */}
-      <main style={{
-        maxWidth: '1680px',
-        width: '100%',
-        margin: '0 auto',
-        padding: '16px 24px 12px 24px',
-        display: 'flex',
-        flexDirection: 'column',
-        flex: 1,
-        minHeight: 0,
-        boxSizing: 'border-box'
-      }}>
+      {/* 2. BODY SPLIT: LEFT VERTICAL SIDEBAR + RIGHT CONTENT */}
+      <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
         
-        {/* KPI Cards */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px', marginBottom: '14px', flexShrink: 0 }}>
-          <div onClick={() => setCallingFilter('All')} style={{ cursor: 'pointer', background: '#fff', padding: '12px 18px', borderRadius: '10px', border: callingFilter === 'All' ? '2px solid #2563eb' : '1px solid #e2e8f0' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748b', fontSize: '11px', fontWeight: 700 }}>TOTAL DEPLOYED <span style={{ background: '#f1f5f9', padding: '2px 6px', borderRadius: '4px', fontSize: '10px' }}>100%</span></div>
-            <div style={{ fontSize: '24px', fontWeight: 800, marginTop: '4px' }}>{counts.total}</div>
+        {/* LEFT VERTICAL CORNER TABS SIDEBAR */}
+        <aside style={{
+          width: '235px',
+          background: '#e9eef4',
+          borderRight: '1px solid #cbd5e1',
+          display: 'flex',
+          flexDirection: 'column',
+          flexShrink: 0,
+          overflowY: 'auto',
+          userSelect: 'none'
+        }}>
+          
+          <div style={{
+            padding: '12px 16px',
+            fontSize: '11px',
+            fontWeight: 800,
+            color: '#64748b',
+            letterSpacing: '0.6px',
+            textTransform: 'uppercase',
+            borderBottom: '1px solid #cbd5e1',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between'
+          }}>
+            <span>SHEETS & VIEWS</span>
+            <span style={{ fontSize: '14px', cursor: 'pointer' }} title="Add Sheet">＋</span>
           </div>
-          <div onClick={() => setCallingFilter('Confirmed')} style={{ cursor: 'pointer', background: '#fff', padding: '12px 18px', borderRadius: '10px', border: callingFilter === 'Confirmed' ? '2px solid #16a34a' : '1px solid #e2e8f0' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', color: '#16a34a', fontSize: '11px', fontWeight: 700 }}>CONFIRMED <span style={{ background: '#dcfce7', padding: '2px 6px', borderRadius: '4px', fontSize: '10px' }}>{counts.total ? Math.round((counts.confirmed / counts.total) * 100) : 0}%</span></div>
-            <div style={{ fontSize: '24px', fontWeight: 800, marginTop: '4px', color: '#16a34a' }}>{counts.confirmed}</div>
-          </div>
-          <div onClick={() => setCallingFilter('Pending')} style={{ cursor: 'pointer', background: '#fff', padding: '12px 18px', borderRadius: '10px', border: callingFilter === 'Pending' ? '2px solid #ca8a04' : '1px solid #e2e8f0' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', color: '#ca8a04', fontSize: '11px', fontWeight: 700 }}>PENDING CALLS <span style={{ background: '#fef9c3', padding: '2px 6px', borderRadius: '4px', fontSize: '10px' }}>{counts.total ? Math.round((counts.pending / counts.total) * 100) : 0}%</span></div>
-            <div style={{ fontSize: '24px', fontWeight: 800, marginTop: '4px', color: '#ca8a04' }}>{counts.pending}</div>
-          </div>
-          <div onClick={() => setCallingFilter('Replaced')} style={{ cursor: 'pointer', background: '#fff', padding: '12px 18px', borderRadius: '10px', border: callingFilter === 'Replaced' ? '2px solid #2563eb' : '1px solid #e2e8f0' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', color: '#2563eb', fontSize: '11px', fontWeight: 700 }}>REPLACED / BACKUP <span style={{ background: '#eff6ff', padding: '2px 6px', borderRadius: '4px', fontSize: '10px' }}>{counts.total ? Math.round((counts.replaced / counts.total) * 100) : 0}%</span></div>
-            <div style={{ fontSize: '24px', fontWeight: 800, marginTop: '4px', color: '#2563eb' }}>{counts.replaced}</div>
-          </div>
-          <div onClick={() => setCallingFilter('Not Reachable')} style={{ cursor: 'pointer', background: '#fff', padding: '12px 18px', borderRadius: '10px', border: activeSheetTab === 'Not Reachable' ? '2px solid #dc2626' : '1px solid #e2e8f0' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', color: '#dc2626', fontSize: '11px', fontWeight: 700 }}>NOT REACHABLE <span style={{ background: '#fee2e2', padding: '2px 6px', borderRadius: '4px', fontSize: '10px' }}>{counts.total ? Math.round((counts.unreachable / counts.total) * 100) : 0}%</span></div>
-            <div style={{ fontSize: '24px', fontWeight: 800, marginTop: '4px', color: '#dc2626' }}>{counts.unreachable}</div>
-          </div>
-        </div>
 
-        {/* Search Bar */}
-        <div style={{ background: '#fff', padding: '10px 14px', borderRadius: '10px', border: '1px solid #e2e8f0', display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '12px', flexShrink: 0 }}>
-          <div style={{ position: 'relative', flex: 1 }}>
-            <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }}>🔍</span>
-            <input type="text" placeholder="Search by center code, center name, city, operator name or mobile number..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ width: '100%', padding: '9px 12px 9px 36px', borderRadius: '7px', border: '1px solid #cbd5e1', fontSize: '13px', outline: 'none', background: '#f8fafc', boxSizing: 'border-box' }} />
+          <div style={{ display: 'flex', flexDirection: 'column', padding: '6px 0' }}>
+            {SHEET_TABS.map((tab) => {
+              const isActive = activeSheetTab === tab.id;
+              return (
+                <div
+                  key={tab.id}
+                  onClick={() => setActiveSheetTab(tab.id)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '10px 14px',
+                    margin: '2px 8px',
+                    borderRadius: '6px',
+                    background: isActive ? '#ffffff' : 'transparent',
+                    color: isActive ? '#1d4ed8' : '#334155',
+                    fontSize: '13px',
+                    fontWeight: isActive ? 700 : 500,
+                    cursor: 'pointer',
+                    borderLeft: `4px solid ${tab.color}`,
+                    boxShadow: isActive ? '0 1px 3px rgba(0,0,0,0.06)' : 'none',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
+                    {tab.locked && <span style={{ fontSize: '11px', color: '#64748b' }}>🔒</span>}
+                    <span style={{ whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
+                      {tab.label}
+                    </span>
+                  </div>
+                  <span style={{ fontSize: '9px', color: '#94a3b8' }}>▼</span>
+                </div>
+              );
+            })}
           </div>
-          <select value={callingFilter} onChange={(e) => setCallingFilter(e.target.value)} style={{ padding: '9px 12px', borderRadius: '7px', border: '1px solid #cbd5e1', fontSize: '13px', background: '#fff', fontWeight: 500, cursor: 'pointer', outline: 'none' }}>
-            <option value="All">Filter: All Statuses</option>
-            <option value="Confirmed">Confirmed Only</option>
-            <option value="Pending">Pending Only</option>
-            <option value="Not Reachable">Not Reachable Only</option>
-            <option value="Replaced">Replaced Only</option>
-          </select>
-          <button onClick={() => fetchRecords(false)} style={{ padding: '9px 14px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '7px', fontWeight: 600, fontSize: '13px', cursor: 'pointer', color: '#334155' }}>
-            🔄 Sync Data
-          </button>
-        </div>
 
-        {/* DATA TABLE CONTAINER */}
-        <div style={{
-          background: '#fff',
-          borderRadius: '10px',
-          border: '1px solid #e2e8f0',
+          <div style={{ marginTop: 'auto', padding: '12px 16px', borderTop: '1px solid #cbd5e1', fontSize: '11px', color: '#64748b' }}>
+            Total Roster: <strong>{records.length}</strong>
+          </div>
+        </aside>
+
+        {/* RIGHT MAIN WORKSPACE */}
+        <main style={{
           display: 'flex',
           flexDirection: 'column',
           flex: 1,
           minHeight: 0,
-          overflow: 'hidden',
-          boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)'
+          padding: '14px 20px 10px 20px',
+          overflow: 'hidden'
         }}>
           
-          <div style={{ flex: 1, overflowY: 'auto', overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
-              <thead style={{ background: '#0f172a', color: '#f8fafc', position: 'sticky', top: 0, zIndex: 20, letterSpacing: '0.4px', textTransform: 'uppercase', fontSize: '11px', fontWeight: 700 }}>
-                <tr>
-                  <th style={{ padding: '12px 14px', width: '85px' }}>Code</th>
-                  <th style={{ padding: '12px 14px', minWidth: '280px' }}>Exam Center Details</th>
-                  <th style={{ padding: '12px 14px', width: '130px' }}>City</th>
-                  <th style={{ padding: '12px 14px', width: '100px' }}>Designation</th>
-                  <th style={{ padding: '12px 14px', width: '75px' }}>Shift</th>
-                  <th style={{ padding: '12px 14px', minWidth: '220px' }}>Operator Details</th>
-                  <th style={{ padding: '12px 14px', width: '185px' }}>Calling Status</th>
-                  <th style={{ padding: '12px 14px', textAlign: 'center', width: '110px' }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  <tr>
-                    <td colSpan={8} style={{ textAlign: 'center', padding: '60px 0', color: '#64748b' }}>
-                      <div style={{ fontSize: '15px', fontWeight: 600 }}>Fetching live database records...</div>
-                    </td>
-                  </tr>
-                ) : filtered.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} style={{ textAlign: 'center', padding: '60px 0', color: '#64748b' }}>
-                      <div style={{ fontSize: '15px', fontWeight: 600, color: '#334155' }}>
-                        {records.length === 0 ? 'No duty roster data uploaded yet.' : `No matching records found for ${activeSheetTab}.`}
-                      </div>
-                      <div style={{ marginTop: '12px' }}>
-                        <button
-                          onClick={() => setShowUploadModal(true)}
-                          style={{ padding: '8px 16px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: '7px', fontWeight: 600, fontSize: '13px', cursor: 'pointer' }}
-                        >
-                          📤 Upload CSV File Now
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ) : (
-                  filtered.map((row, index) => {
-                    const status = row['Biometric Calling Status'] || 'Pending';
-                    const isConfirmed = status === 'Confirmed';
-                    const isReplaced = status === 'Replaced';
-                    const isUnreachable = status === 'Not Reachable';
-
-                    return (
-                      <tr key={row.id || index} style={{ borderBottom: '1px solid #f1f5f9', background: index % 2 === 0 ? '#ffffff' : '#fafafa' }}>
-                        <td style={{ padding: '11px 14px' }}>
-                          <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#2563eb', background: '#eff6ff', padding: '3px 8px', borderRadius: '4px', fontSize: '12px', border: '1px solid #dbeafe' }}>
-                            {row['Center Code']}
-                          </span>
-                        </td>
-                        <td style={{ padding: '11px 14px' }}>
-                          <div style={{ fontWeight: 600, color: '#1e293b', lineHeight: 1.35 }}>{row['Center Name']}</div>
-                        </td>
-                        <td style={{ padding: '11px 14px', color: '#475569', fontWeight: 500 }}>{row['City']}</td>
-                        <td style={{ padding: '11px 14px' }}>
-                          <span style={{ background: '#f1f5f9', color: '#334155', padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 600 }}>
-                            {row['Biometric Designation'] || 'Bio Opr'}
-                          </span>
-                        </td>
-                        <td style={{ padding: '11px 14px' }}>
-                          <span style={{ background: '#e0e7ff', color: '#4338ca', padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 700 }}>
-                            {row['Total Shift'] || 'S1S2'}
-                          </span>
-                        </td>
-                        <td style={{ padding: '11px 14px' }}>
-                          <div style={{ fontWeight: 600, color: '#0f172a' }}>{row['Biometric Operator Name'] || 'Unassigned'}</div>
-                          {row['Biometric Operator Number'] ? (
-                            <a href={`tel:${row['Biometric Operator Number']}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#2563eb', textDecoration: 'none', marginTop: '2px', fontWeight: 500 }}>
-                              📞 {row['Biometric Operator Number']}
-                            </a>
-                          ) : (
-                            <span style={{ fontSize: '12px', color: '#94a3b8' }}>No phone</span>
-                          )}
-                        </td>
-                        <td style={{ padding: '11px 14px' }}>
-                          <select
-                            value={status}
-                            onChange={(e) => updateStatus(row.id, e.target.value)}
-                            style={{
-                              width: '100%',
-                              minWidth: '155px',
-                              padding: '7px 10px',
-                              borderRadius: '7px',
-                              fontSize: '12px',
-                              fontWeight: 700,
-                              cursor: 'pointer',
-                              outline: 'none',
-                              boxSizing: 'border-box',
-                              border: isConfirmed ? '1px solid #86efac' : isReplaced ? '1px solid #bfdbfe' : isUnreachable ? '1px solid #fca5a5' : '1px solid #fde047',
-                              background: isConfirmed ? '#dcfce7' : isReplaced ? '#eff6ff' : isUnreachable ? '#fee2e2' : '#fef9c3',
-                              color: isConfirmed ? '#15803d' : isReplaced ? '#1d4ed8' : isUnreachable ? '#b91c1c' : '#a16207'
-                            }}
-                          >
-                            <option value="Pending">⏳ Pending</option>
-                            <option value="Confirmed">✅ Confirmed</option>
-                            <option value="Replaced">🔄 Replaced</option>
-                            <option value="Not Reachable">❌ Not Reachable</option>
-                          </select>
-                        </td>
-                        <td style={{ padding: '11px 14px', textAlign: 'center' }}>
-                          <button onClick={() => openEditModal(row)} style={{ padding: '5px 11px', background: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', color: '#334155' }}>
-                            ✏️ Reassign
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
+          {/* KPI Cards */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '12px', flexShrink: 0 }}>
+            <div onClick={() => setCallingFilter('All')} style={{ cursor: 'pointer', background: '#fff', padding: '10px 16px', borderRadius: '8px', border: callingFilter === 'All' ? '2px solid #2563eb' : '1px solid #e2e8f0' }}>
+              <div style={{ color: '#64748b', fontSize: '11px', fontWeight: 700 }}>TOTAL DEPLOYED</div>
+              <div style={{ fontSize: '22px', fontWeight: 800, color: '#0f172a' }}>{counts.total}</div>
+            </div>
+            <div onClick={() => setCallingFilter('Confirmed')} style={{ cursor: 'pointer', background: '#fff', padding: '10px 16px', borderRadius: '8px', border: callingFilter === 'Confirmed' ? '2px solid #16a34a' : '1px solid #e2e8f0' }}>
+              <div style={{ color: '#16a34a', fontSize: '11px', fontWeight: 700 }}>CONFIRMED ({counts.total ? Math.round((counts.confirmed / counts.total) * 100) : 0}%)</div>
+              <div style={{ fontSize: '22px', fontWeight: 800, color: '#16a34a' }}>{counts.confirmed}</div>
+            </div>
+            <div onClick={() => setCallingFilter('Pending')} style={{ cursor: 'pointer', background: '#fff', padding: '10px 16px', borderRadius: '8px', border: callingFilter === 'Pending' ? '2px solid #ca8a04' : '1px solid #e2e8f0' }}>
+              <div style={{ color: '#ca8a04', fontSize: '11px', fontWeight: 700 }}>PENDING CALLS ({counts.total ? Math.round((counts.pending / counts.total) * 100) : 0}%)</div>
+              <div style={{ fontSize: '22px', fontWeight: 800, color: '#ca8a04' }}>{counts.pending}</div>
+            </div>
+            <div onClick={() => setCallingFilter('Replaced')} style={{ cursor: 'pointer', background: '#fff', padding: '10px 16px', borderRadius: '8px', border: callingFilter === 'Replaced' ? '2px solid #2563eb' : '1px solid #e2e8f0' }}>
+              <div style={{ color: '#2563eb', fontSize: '11px', fontWeight: 700 }}>REPLACED ({counts.total ? Math.round((counts.replaced / counts.total) * 100) : 0}%)</div>
+              <div style={{ fontSize: '22px', fontWeight: 800, color: '#2563eb' }}>{counts.replaced}</div>
+            </div>
+            <div onClick={() => setCallingFilter('Not Reachable')} style={{ cursor: 'pointer', background: '#fff', padding: '10px 16px', borderRadius: '8px', border: callingFilter === 'Not Reachable' ? '2px solid #dc2626' : '1px solid #e2e8f0' }}>
+              <div style={{ color: '#dc2626', fontSize: '11px', fontWeight: 700 }}>NOT REACHABLE ({counts.total ? Math.round((counts.unreachable / counts.total) * 100) : 0}%)</div>
+              <div style={{ fontSize: '22px', fontWeight: 800, color: '#dc2626' }}>{counts.unreachable}</div>
+            </div>
           </div>
 
-          {/* 3. GOOGLE SHEETS BOTTOM TABS BAR */}
+          {/* Search Bar */}
+          <div style={{ background: '#fff', padding: '8px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '10px', flexShrink: 0 }}>
+            <input type="text" placeholder="Search by center, operator, phone..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ flex: 1, padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', outline: 'none' }} />
+            <select value={callingFilter} onChange={(e) => setCallingFilter(e.target.value)} style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}>
+              <option value="All">All Statuses</option>
+              <option value="Confirmed">Confirmed</option>
+              <option value="Pending">Pending</option>
+              <option value="Not Reachable">Not Reachable</option>
+              <option value="Replaced">Replaced</option>
+            </select>
+            <button onClick={() => fetchRecords(false)} style={{ padding: '8px 14px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '6px', fontWeight: 600, fontSize: '13px', cursor: 'pointer' }}>
+              🔄 Sync Data
+            </button>
+          </div>
+
+          {/* DATA TABLE CONTAINER */}
           <div style={{
-            background: '#e9eef4',
-            borderTop: '1px solid #cbd5e1',
+            background: '#fff',
+            borderRadius: '8px',
+            border: '1px solid #e2e8f0',
             display: 'flex',
-            alignItems: 'center',
-            padding: '0 8px',
-            flexShrink: 0,
-            overflowX: 'auto',
-            userSelect: 'none',
-            height: '38px',
-            boxSizing: 'border-box'
+            flexDirection: 'column',
+            flex: 1,
+            minHeight: 0,
+            overflow: 'hidden'
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '2px', height: '100%' }}>
-              <button 
-                title="Add Sheet"
-                onClick={() => alert('New Custom Sheet tab feature coming soon!')}
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  padding: '4px 10px',
-                  fontSize: '15px',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  color: '#475569',
-                  borderRadius: '4px'
-                }}
-              >
-                ＋
-              </button>
+            
+            <div style={{ flex: 1, overflowY: 'auto', overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
+                <thead style={{ background: '#0f172a', color: '#f8fafc', position: 'sticky', top: 0, zIndex: 20, fontSize: '11px', fontWeight: 700 }}>
+                  <tr>
+                    <th style={{ padding: '10px 14px', width: '85px' }}>Code</th>
+                    <th style={{ padding: '10px 14px', minWidth: '280px' }}>Exam Center Details</th>
+                    <th style={{ padding: '10px 14px', width: '130px' }}>City</th>
+                    <th style={{ padding: '10px 14px', width: '100px' }}>Designation</th>
+                    <th style={{ padding: '10px 14px', width: '75px' }}>Shift</th>
+                    <th style={{ padding: '10px 14px', minWidth: '220px' }}>Operator Details</th>
+                    <th style={{ padding: '10px 14px', width: '185px' }}>Calling Status</th>
+                    <th style={{ padding: '10px 14px', textAlign: 'center', width: '110px' }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading ? (
+                    <tr>
+                      <td colSpan={8} style={{ textAlign: 'center', padding: '50px 0', color: '#64748b' }}>Loading records...</td>
+                    </tr>
+                  ) : filtered.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} style={{ textAlign: 'center', padding: '50px 0', color: '#64748b' }}>No matching records found for tab: <strong>{activeSheetTab}</strong></td>
+                    </tr>
+                  ) : (
+                    filtered.map((row, index) => {
+                      const status = row['Biometric Calling Status'] || 'Pending';
+                      const isConfirmed = status === 'Confirmed';
+                      const isReplaced = status === 'Replaced';
+                      const isUnreachable = status === 'Not Reachable';
 
-              {SHEET_TABS.map((tab) => {
-                const isActive = activeSheetTab === tab.id;
-                return (
-                  <div
-                    key={tab.id}
-                    onClick={() => setActiveSheetTab(tab.id)}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '5px',
-                      padding: '0 12px',
-                      height: '100%',
-                      background: isActive ? '#dbeafe' : 'transparent',
-                      color: isActive ? '#1d4ed8' : '#334155',
-                      fontSize: '12px',
-                      fontWeight: isActive ? 700 : 500,
-                      cursor: 'pointer',
-                      borderRight: '1px solid #cbd5e1',
-                      borderBottom: `3px solid ${tab.color}`,
-                      whiteSpace: 'nowrap',
-                      transition: 'background 0.15s ease'
-                    }}
-                  >
-                    {tab.locked && (
-                      <span style={{ fontSize: '11px', color: isActive ? '#1d4ed8' : '#64748b' }}>🔒</span>
-                    )}
-                    <span>{tab.label}</span>
-                    <span style={{ fontSize: '9px', marginLeft: '2px', color: isActive ? '#1d4ed8' : '#64748b' }}>▼</span>
-                  </div>
-                );
-              })}
+                      return (
+                        <tr key={row.id || index} style={{ borderBottom: '1px solid #f1f5f9', background: index % 2 === 0 ? '#ffffff' : '#fafafa' }}>
+                          <td style={{ padding: '10px 14px' }}>
+                            <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#2563eb', background: '#eff6ff', padding: '3px 8px', borderRadius: '4px' }}>
+                              {row['Center Code']}
+                            </span>
+                          </td>
+                          <td style={{ padding: '10px 14px', fontWeight: 600 }}>{row['Center Name']}</td>
+                          <td style={{ padding: '10px 14px', color: '#475569' }}>{row['City']}</td>
+                          <td style={{ padding: '10px 14px' }}>{row['Biometric Designation'] || 'Bio Opr'}</td>
+                          <td style={{ padding: '10px 14px' }}>{row['Total Shift'] || 'S1S2'}</td>
+                          <td style={{ padding: '10px 14px' }}>
+                            <div style={{ fontWeight: 600 }}>{row['Biometric Operator Name'] || 'Unassigned'}</div>
+                            {row['Biometric Operator Number'] && (
+                              <a href={`tel:${row['Biometric Operator Number']}`} style={{ fontSize: '12px', color: '#2563eb', textDecoration: 'none' }}>
+                                📞 {row['Biometric Operator Number']}
+                              </a>
+                            )}
+                          </td>
+                          <td style={{ padding: '10px 14px' }}>
+                            <select
+                              value={status}
+                              onChange={(e) => updateStatus(row.id, e.target.value)}
+                              style={{
+                                width: '100%',
+                                padding: '6px 8px',
+                                borderRadius: '6px',
+                                fontSize: '12px',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                border: isConfirmed ? '1px solid #86efac' : isReplaced ? '1px solid #bfdbfe' : isUnreachable ? '1px solid #fca5a5' : '1px solid #fde047',
+                                background: isConfirmed ? '#dcfce7' : isReplaced ? '#eff6ff' : isUnreachable ? '#fee2e2' : '#fef9c3',
+                                color: isConfirmed ? '#15803d' : isReplaced ? '#1d4ed8' : isUnreachable ? '#b91c1c' : '#a16207'
+                              }}
+                            >
+                              <option value="Pending">⏳ Pending</option>
+                              <option value="Confirmed">✅ Confirmed</option>
+                              <option value="Replaced">🔄 Replaced</option>
+                              <option value="Not Reachable">❌ Not Reachable</option>
+                            </select>
+                          </td>
+                          <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                            <button onClick={() => openEditModal(row)} style={{ padding: '5px 10px', background: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '12px', cursor: 'pointer' }}>
+                              ✏️ Reassign
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
             </div>
 
-            <div style={{ marginLeft: 'auto', fontSize: '11px', color: '#64748b', fontWeight: 600, paddingRight: '8px', whiteSpace: 'nowrap' }}>
-              Showing {filtered.length} entries in <strong>{activeSheetTab}</strong>
+            <div style={{ padding: '8px 16px', background: '#f8fafc', borderTop: '1px solid #e2e8f0', fontSize: '12px', color: '#64748b', display: 'flex', justifyContent: 'space-between' }}>
+              <span>Active Tab: <strong>{activeSheetTab}</strong> ({filtered.length} entries shown)</span>
+              <span>InnoView PET Portal</span>
             </div>
+
           </div>
 
+        </main>
+      </div>
+
+      {/* Modal 1: Upload CSV */}
+      {showUploadModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
+          <div style={{ background: '#fff', borderRadius: '12px', width: '480px', padding: '24px' }}>
+            <h3 style={{ margin: '0 0 16px 0' }}>Upload Roster CSV</h3>
+            <div style={{ display: 'flex', gap: '10px', marginBottom: '16px' }}>
+              <button onClick={() => setUploadMode('replace')} style={{ flex: 1, padding: '8px', border: uploadMode === 'replace' ? '2px solid #2563eb' : '1px solid #cbd5e1' }}>Replace All</button>
+              <button onClick={() => setUploadMode('append')} style={{ flex: 1, padding: '8px', border: uploadMode === 'append' ? '2px solid #2563eb' : '1px solid #cbd5e1' }}>Append</button>
+            </div>
+            <input type="file" accept=".csv" ref={fileInputRef} onChange={handleFileUpload} disabled={isUploading} />
+            {uploadStatus && <div style={{ marginTop: '12px', color: '#2563eb', fontSize: '12px' }}>{uploadStatus}</div>}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '16px' }}>
+              <button onClick={() => setShowUploadModal(false)} disabled={isUploading} style={{ padding: '6px 14px' }}>Close</button>
+            </div>
+          </div>
         </div>
+      )}
 
-        {/* Modal 1: Upload / Replace CSV */}
-        {showUploadModal && (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.65)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
-            <div style={{ background: '#fff', borderRadius: '14px', width: '520px', maxWidth: '94%', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.25)', border: '1px solid #e2e8f0', overflow: 'hidden' }}>
-              <div style={{ background: '#0f172a', padding: '18px 24px', color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 700 }}>Update Center Roster List</h3>
-                  <p style={{ margin: '3px 0 0 0', fontSize: '12px', color: '#94a3b8' }}>Upload a new CSV file to refresh duty roster records</p>
-                </div>
-                {!isUploading && (
-                  <button onClick={() => setShowUploadModal(false)} style={{ background: 'transparent', border: 'none', color: '#94a3b8', fontSize: '20px', cursor: 'pointer' }}>✕</button>
-                )}
-              </div>
-
-              <div style={{ padding: '24px' }}>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, marginBottom: '8px', color: '#1e293b' }}>Update Action:</label>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '18px' }}>
-                  <button type="button" onClick={() => setUploadMode('replace')} style={{ padding: '10px', borderRadius: '8px', border: uploadMode === 'replace' ? '2px solid #2563eb' : '1px solid #cbd5e1', background: uploadMode === 'replace' ? '#eff6ff' : '#fff', color: uploadMode === 'replace' ? '#1d4ed8' : '#475569', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}>
-                    🔄 Replace Entire List
-                  </button>
-                  <button type="button" onClick={() => setUploadMode('append')} style={{ padding: '10px', borderRadius: '8px', border: uploadMode === 'append' ? '2px solid #2563eb' : '1px solid #cbd5e1', background: uploadMode === 'append' ? '#eff6ff' : '#fff', color: uploadMode === 'append' ? '#1d4ed8' : '#475569', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}>
-                    ➕ Append To Existing
-                  </button>
-                </div>
-
-                <div style={{ border: '2px dashed #cbd5e1', borderRadius: '10px', padding: '24px 16px', textAlign: 'center', background: '#f8fafc', marginBottom: '16px' }}>
-                  <div style={{ fontSize: '32px', marginBottom: '8px' }}>📁</div>
-                  <div style={{ fontSize: '13px', fontWeight: 600, color: '#1e293b', marginBottom: '4px' }}>Select your CSV / Excel Roster File</div>
-                  <input type="file" accept=".csv" ref={fileInputRef} disabled={isUploading} onChange={handleFileUpload} style={{ fontSize: '12px', cursor: 'pointer' }} />
-                </div>
-
-                {uploadStatus && (
-                  <div style={{ padding: '10px 14px', borderRadius: '8px', background: '#f1f5f9', border: '1px solid #e2e8f0', fontSize: '12px', color: '#2563eb', fontWeight: 600, textAlign: 'center', marginBottom: '10px' }}>
-                    ⏳ {uploadStatus}
-                  </div>
-                )}
-
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                  <button type="button" disabled={isUploading} onClick={() => setShowUploadModal(false)} style={{ padding: '8px 16px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 600, color: '#475569' }}>
-                    Close
-                  </button>
-                </div>
-              </div>
+      {/* Modal 2: Confirm Clear */}
+      {showClearModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 110 }}>
+          <div style={{ background: '#fff', borderRadius: '12px', width: '400px', padding: '24px' }}>
+            <h3 style={{ margin: '0 0 12px 0', color: '#dc2626' }}>Clear Entire List?</h3>
+            <p style={{ margin: '0 0 16px 0', fontSize: '13px' }}>Delete all {records.length} records?</p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button onClick={() => setShowClearModal(false)} disabled={isClearing}>Cancel</button>
+              <button onClick={handleClearRoster} disabled={isClearing} style={{ background: '#dc2626', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: '6px' }}>{isClearing ? 'Deleting...' : 'Delete All'}</button>
             </div>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Modal 2: Confirm Clear */}
-        {showClearModal && (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.65)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 110 }}>
-            <div style={{ background: '#fff', borderRadius: '14px', width: '420px', maxWidth: '92%', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.25)', border: '1px solid #fee2e2', overflow: 'hidden' }}>
-              <div style={{ background: '#dc2626', padding: '16px 20px', color: '#fff' }}>
-                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700 }}>⚠️ Clear Entire Roster List?</h3>
+      {/* Modal 3: Reassign */}
+      {editingRow && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
+          <div style={{ background: '#fff', borderRadius: '12px', width: '420px', padding: '20px' }}>
+            <h3 style={{ margin: '0 0 14px 0' }}>Reassign Operator</h3>
+            <form onSubmit={handleSaveEdit}>
+              <input type="text" placeholder="Name" required value={editFormData.name} onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })} style={{ width: '100%', padding: '8px', marginBottom: '10px', boxSizing: 'border-box' }} />
+              <input type="text" placeholder="Phone" required value={editFormData.phone} onChange={(e) => setEditFormData({ ...editFormData, phone: e.target.value })} style={{ width: '100%', padding: '8px', marginBottom: '10px', boxSizing: 'border-box' }} />
+              <input type="text" placeholder="Shift" value={editFormData.shift} onChange={(e) => setEditFormData({ ...editFormData, shift: e.target.value })} style={{ width: '100%', padding: '8px', marginBottom: '14px', boxSizing: 'border-box' }} />
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                <button type="button" onClick={() => setEditingRow(null)}>Cancel</button>
+                <button type="submit" style={{ background: '#2563eb', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: '6px' }}>Save</button>
               </div>
-              <div style={{ padding: '20px' }}>
-                <p style={{ margin: '0 0 16px 0', fontSize: '13px', color: '#334155', lineHeight: 1.5 }}>
-                  Are you sure you want to delete all <strong>{records.length} records</strong>? This action cannot be undone.
-                </p>
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-                  <button type="button" disabled={isClearing} onClick={() => setShowClearModal(false)} style={{ padding: '8px 16px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: 600, color: '#475569' }}>
-                    Cancel
-                  </button>
-                  <button type="button" disabled={isClearing} onClick={handleClearRoster} style={{ padding: '8px 18px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: 600 }}>
-                    {isClearing ? 'Deleting...' : 'Yes, Delete All'}
-                  </button>
-                </div>
-              </div>
-            </div>
+            </form>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Modal 3: Reassign */}
-        {editingRow && (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.6)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
-            <div style={{ background: '#fff', borderRadius: '12px', width: '440px', maxWidth: '92%', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)', border: '1px solid #e2e8f0', overflow: 'hidden' }}>
-              <div style={{ background: '#0b132b', padding: '16px 20px', color: '#fff' }}>
-                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700 }}>Reassign Center Operator</h3>
-                <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: '#94a3b8' }}>{editingRow['Center Name']} ({editingRow['Center Code']})</p>
-              </div>
-              
-              <form onSubmit={handleSaveEdit} style={{ padding: '20px' }}>
-                <div style={{ marginBottom: '14px' }}>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '6px', color: '#334155' }}>Operator Full Name</label>
-                  <input type="text" required value={editFormData.name} onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })} style={{ width: '100%', padding: '9px 12px', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box' }} />
-                </div>
-                <div style={{ marginBottom: '14px' }}>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '6px', color: '#334155' }}>Operator Mobile Number</label>
-                  <input type="text" required value={editFormData.phone} onChange={(e) => setEditFormData({ ...editFormData, phone: e.target.value })} style={{ width: '100%', padding: '9px 12px', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box' }} />
-                </div>
-                <div style={{ marginBottom: '20px' }}>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '6px', color: '#334155' }}>Assigned Shift</label>
-                  <input type="text" value={editFormData.shift} onChange={(e) => setEditFormData({ ...editFormData, shift: e.target.value })} style={{ width: '100%', padding: '9px 12px', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box' }} />
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-                  <button type="button" onClick={() => setEditingRow(null)} style={{ padding: '8px 16px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: 600, color: '#475569' }}>
-                    Cancel
-                  </button>
-                  <button type="submit" style={{ padding: '8px 18px', background: 'linear-gradient(135deg, #2563eb, #1d4ed8)', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: 600 }}>
-                    Save & Mark Replaced
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
-
-      </main>
     </div>
   );
 }
