@@ -9,7 +9,6 @@ const supabase = createClient(
 const ADMIN_USER = 'admin';
 const ADMIN_PASS = 'admin123';
 
-// Screenshot ke exact tabs aur unki sheet color strips
 const SHEET_TABS = [
   { id: 'Dashboard', label: 'Dashboard', locked: true, color: '#b91c1c' },
   { id: 'RM Dashboard', label: 'RM Dashboard', locked: false, color: '#15803d' },
@@ -84,21 +83,25 @@ export default function OpsPortal() {
     if (!isBackground) setLoading(true);
     setIsSyncing(true);
 
-    let query = supabase.from('duty_roster').select('*').range(0, 4999);
-    if (callingFilter !== 'All') {
-      query = query.eq('Biometric Calling Status', callingFilter);
-    }
-    const { data, error } = await query;
-    if (error) {
-      console.error('Supabase Error:', error);
-      if (!isBackground) alert('Supabase Error: ' + error.message);
-    } else {
-      if (!editingRowRef.current) {
-        setRecords(data || []);
+    try {
+      let query = supabase.from('duty_roster').select('*').range(0, 4999);
+      if (callingFilter !== 'All') {
+        query = query.eq('Biometric Calling Status', callingFilter);
       }
+      const { data, error } = await query;
+      if (error) {
+        console.error('Supabase Error:', error);
+      } else {
+        if (!editingRowRef.current) {
+          setRecords(data || []);
+        }
+      }
+    } catch (err) {
+      console.error('Fetch err:', err);
+    } finally {
+      if (!isBackground) setLoading(false);
+      setTimeout(() => setIsSyncing(false), 400);
     }
-    if (!isBackground) setLoading(false);
-    setTimeout(() => setIsSyncing(false), 400);
   };
 
   useEffect(() => {
@@ -334,6 +337,7 @@ export default function OpsPortal() {
     unreachable: records.filter((r) => r['Biometric Calling Status'] === 'Not Reachable').length
   };
 
+  // Safe tab filter logic (Dashboard & Operator Calling Status show all records)
   const filtered = records.filter((r) => {
     const q = search.toLowerCase();
     const matchesSearch =
@@ -343,12 +347,15 @@ export default function OpsPortal() {
       (r['Biometric Operator Number'] && String(r['Biometric Operator Number']).toLowerCase().includes(q)) ||
       (r['City'] && String(r['City']).toLowerCase().includes(q));
 
-    // Tab-based view logic
     let matchesTab = true;
-    if (activeSheetTab === 'Operator Calling Status') {
+    if (activeSheetTab === 'Dashboard' || activeSheetTab === 'Operator Calling Status') {
       matchesTab = true;
+    } else if (activeSheetTab === 'RM Dashboard' || activeSheetTab === 'RM O.C Dashboard') {
+      matchesTab = (r['Biometric Designation'] || '').toLowerCase().includes('rm') || (r['Biometric Designation'] || '').toLowerCase().includes('nodal');
+    } else if (activeSheetTab === 'O.C Dashboard') {
+      matchesTab = (r['Biometric Designation'] || '').toLowerCase().includes('oc') || (r['Biometric Designation'] || '').toLowerCase().includes('coord');
     } else if (activeSheetTab === 'Mock Calling Status') {
-      matchesTab = (r['Total Shift'] || '').includes('Mock') || (r['Biometric Calling Status'] || '').includes('Mock');
+      matchesTab = (r['Total Shift'] || '').toLowerCase().includes('mock') || (r['Biometric Calling Status'] || '').toLowerCase().includes('mock');
     } else if (activeSheetTab === 'Exam Day Calling Status') {
       matchesTab = (r['Biometric Calling Status'] === 'Confirmed');
     }
@@ -495,7 +502,7 @@ export default function OpsPortal() {
             <div style={{ display: 'flex', justifyContent: 'space-between', color: '#2563eb', fontSize: '11px', fontWeight: 700 }}>REPLACED / BACKUP <span style={{ background: '#eff6ff', padding: '2px 6px', borderRadius: '4px', fontSize: '10px' }}>{counts.total ? Math.round((counts.replaced / counts.total) * 100) : 0}%</span></div>
             <div style={{ fontSize: '24px', fontWeight: 800, marginTop: '4px', color: '#2563eb' }}>{counts.replaced}</div>
           </div>
-          <div onClick={() => setCallingFilter('Not Reachable')} style={{ cursor: 'pointer', background: '#fff', padding: '12px 18px', borderRadius: '10px', border: callingFilter === 'Not Reachable' ? '2px solid #dc2626' : '1px solid #e2e8f0' }}>
+          <div onClick={() => setCallingFilter('Not Reachable')} style={{ cursor: 'pointer', background: '#fff', padding: '12px 18px', borderRadius: '10px', border: activeSheetTab === 'Not Reachable' ? '2px solid #dc2626' : '1px solid #e2e8f0' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', color: '#dc2626', fontSize: '11px', fontWeight: 700 }}>NOT REACHABLE <span style={{ background: '#fee2e2', padding: '2px 6px', borderRadius: '4px', fontSize: '10px' }}>{counts.total ? Math.round((counts.unreachable / counts.total) * 100) : 0}%</span></div>
             <div style={{ fontSize: '24px', fontWeight: 800, marginTop: '4px', color: '#dc2626' }}>{counts.unreachable}</div>
           </div>
@@ -556,7 +563,17 @@ export default function OpsPortal() {
                 ) : filtered.length === 0 ? (
                   <tr>
                     <td colSpan={8} style={{ textAlign: 'center', padding: '60px 0', color: '#64748b' }}>
-                      No matching exam records found for <strong>{activeSheetTab}</strong>.
+                      <div style={{ fontSize: '15px', fontWeight: 600, color: '#334155' }}>
+                        {records.length === 0 ? 'No duty roster data uploaded yet.' : `No matching records found for ${activeSheetTab}.`}
+                      </div>
+                      <div style={{ marginTop: '12px' }}>
+                        <button
+                          onClick={() => setShowUploadModal(true)}
+                          style={{ padding: '8px 16px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: '7px', fontWeight: 600, fontSize: '13px', cursor: 'pointer' }}
+                        >
+                          📤 Upload CSV File Now
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ) : (
@@ -635,7 +652,7 @@ export default function OpsPortal() {
             </table>
           </div>
 
-          {/* 3. GOOGLE SHEETS EXACT BOTTOM TABS BAR */}
+          {/* 3. GOOGLE SHEETS BOTTOM TABS BAR */}
           <div style={{
             background: '#e9eef4',
             borderTop: '1px solid #cbd5e1',
@@ -649,8 +666,6 @@ export default function OpsPortal() {
             boxSizing: 'border-box'
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '2px', height: '100%' }}>
-              
-              {/* Plus (+) Button like Google Sheets */}
               <button 
                 title="Add Sheet"
                 onClick={() => alert('New Custom Sheet tab feature coming soon!')}
@@ -668,7 +683,6 @@ export default function OpsPortal() {
                 ＋
               </button>
 
-              {/* Exact Screenshot Tabs with Lock icons & Dropdown arrows */}
               {SHEET_TABS.map((tab) => {
                 const isActive = activeSheetTab === tab.id;
                 return (
@@ -692,26 +706,16 @@ export default function OpsPortal() {
                       transition: 'background 0.15s ease'
                     }}
                   >
-                    {/* Lock Icon */}
                     {tab.locked && (
-                      <span style={{ fontSize: '11px', color: isActive ? '#1d4ed8' : '#64748b' }}>
-                        🔒
-                      </span>
+                      <span style={{ fontSize: '11px', color: isActive ? '#1d4ed8' : '#64748b' }}>🔒</span>
                     )}
-
                     <span>{tab.label}</span>
-
-                    {/* Dropdown Arrow */}
-                    <span style={{ fontSize: '9px', marginLeft: '2px', color: isActive ? '#1d4ed8' : '#64748b' }}>
-                      ▼
-                    </span>
+                    <span style={{ fontSize: '9px', marginLeft: '2px', color: isActive ? '#1d4ed8' : '#64748b' }}>▼</span>
                   </div>
                 );
               })}
-
             </div>
 
-            {/* Right side live count indicator */}
             <div style={{ marginLeft: 'auto', fontSize: '11px', color: '#64748b', fontWeight: 600, paddingRight: '8px', whiteSpace: 'nowrap' }}>
               Showing {filtered.length} entries in <strong>{activeSheetTab}</strong>
             </div>
